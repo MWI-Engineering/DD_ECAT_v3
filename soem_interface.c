@@ -14,7 +14,7 @@
 // If it's not strictly necessary for types defined within this file, consider removing it
 // Added ethercatprint.h explicitly for ec_set_print_func, as identified in previous errors
 #include <ethercatprint.h>
-#include "ethercattype.h" 
+// #include "ethercattype.h" 
 // nicdrv.h, ethercatmain.h, ethercatcoe.h, ethercatfoe.h, ethercatconfig.h are generally internal to SOEM
 // and are often not directly included by application code. ethercat.h handles most of these.
 // Unless you are directly calling very low-level functions from these, it's better to rely on ethercat.h
