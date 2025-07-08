@@ -3,11 +3,7 @@
 #include <stdio.h> // For printf (for debugging)
 #include <math.h>  // For fmax, fmin
 
-// Define effect types (should match what HID sends)
-#define FFB_EFFECT_CONSTANT_FORCE 0
-#define FFB_EFFECT_SPRING         1
-#define FFB_EFFECT_DAMPER         2
-// Add more as needed
+// The FFB_EFFECT defines have been moved to ffb_calculator.h
 
 /**
  * @brief Initializes the FFB calculator.
