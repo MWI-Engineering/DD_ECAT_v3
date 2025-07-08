@@ -12,6 +12,8 @@
 #include <ethercat.h>
 // ethercattype.h is usually included by ethercat.h or soem_interface.h if it defines types used here
 // If it's not strictly necessary for types defined within this file, consider removing it
+// Added ethercatprint.h explicitly for ec_set_print_func, as identified in previous errors
+#include <ethercatprint.h>
 #include "ethercattype.h" 
 // nicdrv.h, ethercatmain.h, ethercatcoe.h, ethercatfoe.h, ethercatconfig.h are generally internal to SOEM
 // and are often not directly included by application code. ethercat.h handles most of these.
@@ -23,8 +25,7 @@
 #include "ethercatcoe.h"
 #include "ethercatfoe.h"
 #include "ethercatconfig.h"
-// Added ethercatprint.h explicitly for ec_set_print_func, as identified in previous errors
-#include <ethercatprint.h>
+
 
 // --- SOEM Global Variables ---
 char IOmap[4096]; // Global memory for EtherCAT Process Data
@@ -119,10 +120,71 @@ static float current_velocity_f = 0.0f; // Floating point velocity
 // Corrected ecat_loop: OSAL_THREAD_FUNC is typically void, so no return value.
 OSAL_THREAD_FUNC ecat_loop(void *ptr)
 {
-    // ... your existing ecat_loop logic ...
-    // Remove the 'return 0;' or 'return NULL;' line
-    // If you need to indicate thread termination, the OSAL layer might provide specific functions.
-    // For a continuous loop, it typically just runs until the program exits or a specific exit condition is met.
+    // A flag to control the loop's execution, typically set to false to stop the thread
+    // This 'run_thread' variable would be a global or static variable,
+    // and your main application would set it to false when it wants to shut down.
+    int *run_thread = (int *)ptr; // Assuming 'ptr' is a pointer to an integer flag
+
+    printf("EtherCAT loop thread started.\n");
+
+    // Main EtherCAT loop
+    while (*run_thread) // Loop continues as long as the run_thread flag is true
+    {
+        // 1. Send process data (outputs) to slaves
+        //   ec_send_processdata() sends the data from IOmap to the slaves.
+        ec_send_processdata();
+
+        // 2. Receive process data (inputs) from slaves
+        //   ec_receive_processdata(EC_TIMEOUTRET) waits for received data up to a timeout.
+        //   It returns the working counter (wkc) for the received data.
+        wkc = ec_receive_processdata(EC_TIMEOUTRET);
+
+        // 3. Process the received data (check working counter, update inputs)
+        if (wkc >= expectedWKC)
+        {
+            // Data received successfully.
+            // You can now access the input PDOs through 'somanet_inputs'.
+            // Example:
+            // printf("Slave 1 Statusword: 0x%04X\n", somanet_inputs->statusword);
+            // printf("Slave 1 Position: %d\n", somanet_inputs->position_actual_value);
+
+            // Call a function to read/update your application's input values
+            // based on the received EtherCAT data.
+            soem_interface_read_inputs(); // You would implement this function
+
+            // Call a function to update the output values that will be sent in the next cycle.
+            // This function would typically take control commands from your application.
+            soem_interface_write_outputs(); // You would implement this function
+
+        }
+        else
+        {
+            // Working counter mismatch or timeout. This indicates a problem
+            // (e.g., slave not responding, communication issue).
+            // You might want to handle errors, try to recover, or log this.
+            printf("EtherCAT loop: WKC mismatch. Expected %d, Got %d\n", expectedWKC, wkc);
+            // Optionally, try to recover or re-initialize:
+            // ec_readstate();
+            // Check slave states, try to bring them back to OP.
+        }
+
+        // 4. Manage distributed clocks (if using DC)
+        // If your system relies on Distributed Clocks for synchronization,
+        // you would periodically update them here.
+        // if (ec_configdc()) {
+        //     // DC configured successfully
+        // }
+
+        // 5. Short delay for cycle time
+        // This usleep defines the cycle time of your EtherCAT loop.
+        // For a 1ms cycle, it would be 1000 microseconds.
+        // Adjust this based on your application's requirements and slave capabilities.
+        usleep(1000); // Example: 1ms cycle time (1000 microseconds)
+    }
+
+    printf("EtherCAT loop thread stopped.\n");
+    // As OSAL_THREAD_FUNC is void, no return statement is needed.
+    // The thread simply exits when *run_thread becomes false.
 }
 
 // SOEM hook for printing messages (optional, but good for debugging)
