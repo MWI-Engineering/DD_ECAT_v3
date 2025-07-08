@@ -3,8 +3,10 @@
 #include <stdio.h>
 #include <unistd.h> // For usleep
 #include <string.h> // For memset
+#include <stdarg.h> // For va_list in ecat_print_func
 
 // --- SOEM Library Includes ---
+// Ensure these paths are correct relative to your SOEM installation
 #include "ethercattype.h"
 #include "nicdrv.h"
 #include "ethercatmain.h"
