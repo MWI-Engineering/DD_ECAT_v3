@@ -4,7 +4,6 @@
 #include <pthread.h> // For threading
 
 // Add this define before including unistd.h to help with usleep declaration
-#define _DEFAULT_SOURCE
 #include <unistd.h>  // For usleep
 #include <stdlib.h>  // For malloc, free
 
