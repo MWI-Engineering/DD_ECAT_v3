@@ -114,10 +114,26 @@ static int master_initialized = 0;
 static float current_position_f = 0.0f; // Floating point position
 static float current_velocity_f = 0.0f; // Floating point velocity
 
-
 // --- SOEM Utility Functions ---
 // For printing SOEM messages
 // Corrected ecat_loop: OSAL_THREAD_FUNC is typically void, so no return value.
+// Add these function implementations somewhere after your global variables or other functions
+void soem_interface_read_inputs(void)
+{
+    // For now, leave empty or add a printf for testing
+    //printf("Reading inputs current_position_f\n");
+    // Example: You would copy data from somanet_inputs to your application variables here
+    // current_position_f = (float)somanet_inputs->position_actual_value;
+}
+
+void soem_interface_write_outputs(void)
+{
+    // For now, leave empty or add a printf for testing
+    // printf("Writing outputs...\n");
+    // Example: You would copy data from your application variables to somanet_outputs here
+    // somanet_outputs->target_position = (int32)desired_position;
+}
+
 OSAL_THREAD_FUNC ecat_loop(void *ptr)
 {
     // A flag to control the loop's execution, typically set to false to stop the thread
