@@ -6,7 +6,6 @@
 
 // Add this define before including unistd.h to help with usleep declaration
 #include <unistd.h> // For usleep
-
 #include "hid_interface.h"
 #include "ffb_calculator.h"
 #include "soem_interface.h"
