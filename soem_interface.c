@@ -104,13 +104,11 @@ static float current_velocity_f = 0.0f; // Floating point velocity
 
 // --- SOEM Utility Functions ---
 // For printing SOEM messages
-OSAL_THREAD_FUNC ecat_loop(void *ptr)
+// To this:
+void *ecat_loop(void *ptr) // Or int ecat_loop(void *ptr) depending on OSAL_THREAD_FUNC definition
 {
-    // This function is typically used for a separate thread that
-    // sends and receives process data. For simplicity, we'll
-    // integrate it directly into the main loop in this example.
-    // In a real-time application, this would be a high-priority thread.
-    return 0;
+    // ...
+    return NULL; // Or return (void*)0; or simply return; if the thread function doesn't need to return a value that is used
 }
 
 // SOEM hook for printing messages (optional, but good for debugging)
