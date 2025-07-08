@@ -12,7 +12,7 @@ CC = gcc
 # -I/home/mwi/SOEM/install/include/soem: Corrected SOEM include path
 # -D_POSIX_C_SOURCE=200809L: Required for clock_gettime on some systems
 # Add _DEFAULT_SOURCE to ensure usleep is declared, if needed by your glibc version
-CFLAGS = -Wall -O2 -std=c11 -pthread -I. -I/home/mwi/SOEM/install/include -D_DEFAULT_SOURCE
+CFLAGS = -Wall -O2 -std=c11 -pthread -I. -I/home/mwi/SOEM/install/include/soem -D_DEFAULT_SOURCE
 
 # Linker flags
 # -L/home/mwi/SOEM/install/lib: Add SOEM library path
