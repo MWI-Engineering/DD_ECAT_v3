@@ -2,6 +2,13 @@
 #ifndef FFB_CALCULATOR_H
 #define FFB_CALCULATOR_H
 
+// Define effect types (should match what HID sends)
+// These need to be in the header so other files can see them.
+#define FFB_EFFECT_CONSTANT_FORCE 0
+#define FFB_EFFECT_SPRING         1
+#define FFB_EFFECT_DAMPER         2
+// Add more as needed
+
 // Define a simple structure for an FFB effect (conceptual)
 typedef struct {
     int type;      // e.g., 0 for constant_force, 1 for spring, etc.
