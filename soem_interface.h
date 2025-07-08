@@ -1,6 +1,8 @@
 // soem_interface.h
 #ifndef SOEM_INTERFACE_H
 #define SOEM_INTERFACE_H
+#include <stdint.h> // For int32, etc.
+#include <pthread.h> // For OSAL_THREAD_FUNC if it's defined here
 
 // Function prototypes for SOEM interface
 /**
@@ -34,5 +36,14 @@ float soem_interface_get_current_velocity();
  * @brief Stops the SOEM master and cleans up resources.
  */
 void soem_interface_stop_master();
+// Add these new declarations:
+void soem_interface_read_inputs(void);
+void soem_interface_write_outputs(void);
+
+// Also ensure this is declared if it's external:
+// int soem_interface_init_master(const char *ifname); // Assuming it's already there
+
+// If your ecat_loop is meant to be called from main, you might declare it here too:
+// OSAL_THREAD_FUNC ecat_loop(void *ptr); // Or just void *ecat_loop(void *ptr);
 
 #endif // SOEM_INTERFACE_H
