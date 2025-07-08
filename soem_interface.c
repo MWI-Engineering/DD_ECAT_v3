@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <unistd.h> // For usleep
 #include <string.h> // For memset
+#include <pthread.h>
 #include <stdarg.h> // For va_list in ecat_print_func
 
 // --- SOEM Library Includes ---
