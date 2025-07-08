@@ -8,14 +8,23 @@
 
 // --- SOEM Library Includes ---
 // Ensure these paths are correct relative to your SOEM installation
-#include <ethercat.h> 
-#include "ethercattype.h"
+// Changed to <ethercat.h> directly as per previous discussion, assuming -I includes /home/mwi/SOEM/install/include/soem
+#include <ethercat.h>
+// ethercattype.h is usually included by ethercat.h or soem_interface.h if it defines types used here
+// If it's not strictly necessary for types defined within this file, consider removing it
+#include "ethercattype.h" 
+// nicdrv.h, ethercatmain.h, ethercatcoe.h, ethercatfoe.h, ethercatconfig.h are generally internal to SOEM
+// and are often not directly included by application code. ethercat.h handles most of these.
+// Unless you are directly calling very low-level functions from these, it's better to rely on ethercat.h
+// to pull in what's necessary. Over-including can sometimes lead to conflicts or longer compile times.
+// For now, let's keep them if they were previously there, but be aware they might not be needed.
 #include "nicdrv.h"
 #include "ethercatmain.h"
 #include "ethercatcoe.h"
 #include "ethercatfoe.h"
 #include "ethercatconfig.h"
-#include "ethercatprint.h"
+// Added ethercatprint.h explicitly for ec_set_print_func, as identified in previous errors
+#include <ethercatprint.h>
 
 // --- SOEM Global Variables ---
 char IOmap[4096]; // Global memory for EtherCAT Process Data
@@ -104,13 +113,16 @@ static int master_initialized = 0;
 static float current_position_f = 0.0f; // Floating point position
 static float current_velocity_f = 0.0f; // Floating point velocity
 
+
 // --- SOEM Utility Functions ---
 // For printing SOEM messages
-// To this:
-void *ecat_loop(void *ptr) // Or int ecat_loop(void *ptr) depending on OSAL_THREAD_FUNC definition
+// Corrected ecat_loop: OSAL_THREAD_FUNC is typically void, so no return value.
+OSAL_THREAD_FUNC ecat_loop(void *ptr)
 {
-    // ...
-    return NULL; // Or return (void*)0; or simply return; if the thread function doesn't need to return a value that is used
+    // ... your existing ecat_loop logic ...
+    // Remove the 'return 0;' or 'return NULL;' line
+    // If you need to indicate thread termination, the OSAL layer might provide specific functions.
+    // For a continuous loop, it typically just runs until the program exits or a specific exit condition is met.
 }
 
 // SOEM hook for printing messages (optional, but good for debugging)
