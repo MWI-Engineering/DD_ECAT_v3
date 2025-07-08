@@ -8,7 +8,7 @@
 
 // --- SOEM Library Includes ---
 // Ensure these paths are correct relative to your SOEM installation
-#include <soem/ethercat.h> 
+#include <ethercat.h> 
 #include "ethercattype.h"
 #include "nicdrv.h"
 #include "ethercatmain.h"
