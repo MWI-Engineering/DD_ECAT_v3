@@ -206,7 +206,7 @@ int soem_interface_init_master(const char *ifname) {
 
     // Set SOEM print function for debugging
     ec_set_print_func(ecat_print_func);
-
+    
     // Initialize SOEM master
     if (ec_init(ifname)) {
         printf("SOEM_Interface: ec_init success.\n");
@@ -225,7 +225,8 @@ int soem_interface_init_master(const char *ifname) {
                 printf("SOEM_Interface: Configuring PDOs for Synapticon ACTILINK-S (Slave %d)....\n", slave_idx);
 
                 // Map PDOs for the specific slave
-                ec_config_map_v2(&IOmap[0], 0); // Map all slaves, starting from IOmap[0]
+                ec_config_map_group(&IOmap[0], 0);
+                // ec_config_map_v2(&IOmap[0], 0); // Map all slaves, starting from IOmap[0]
 
                 // Get pointers to the PDOs for slave 1
                 somanet_outputs = (SomanetOutputs_t *)ec_slave[slave_idx].outputs;
