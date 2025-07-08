@@ -5,7 +5,6 @@
 #include <signal.h> // For signal handling
 
 // Add this define before including unistd.h to help with usleep declaration
-#define _DEFAULT_SOURCE
 #include <unistd.h> // For usleep
 
 #include "hid_interface.h"
