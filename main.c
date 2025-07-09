@@ -9,6 +9,7 @@
 #include "hid_interface.h"
 #include "ffb_calculator.h"
 #include "soem_interface.h"
+#include <linux/time.h>
 
 // Global flag for graceful shutdown
 static volatile int running = 1;
