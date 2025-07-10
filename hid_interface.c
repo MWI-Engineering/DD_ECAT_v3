@@ -45,6 +45,50 @@ typedef struct {
     uint8_t reserved[2];
 } ffb_condition_report_t;
 
+typedef struct {
+    uint8_t report_id;
+    uint8_t effect_id;
+    uint8_t waveform;          // 0=square, 1=sine, 2=triangle, 3=sawtooth up, 4=sawtooth down
+    uint8_t magnitude;         // Peak amplitude
+    uint8_t offset;            // DC offset
+    uint8_t frequency;         // Frequency in Hz
+    uint8_t phase;             // Phase shift
+    uint8_t reserved;
+} ffb_periodic_report_t;
+
+typedef struct {
+    uint8_t report_id;
+    uint8_t effect_id;
+    uint8_t start_magnitude;   // Starting magnitude
+    uint8_t end_magnitude;     // Ending magnitude
+    uint8_t duration;          // Duration of ramp
+    uint8_t reserved[3];
+} ffb_ramp_report_t;
+
+typedef struct {
+    uint8_t report_id;
+    uint8_t effect_id;
+    uint8_t parameter_type;    // 0=gain, 1=sample_rate, 2=trigger_button, etc.
+    uint8_t value;
+    uint8_t reserved[4];
+} ffb_effect_param_report_t;
+
+typedef struct {
+    uint8_t report_id;
+    uint8_t effect_id;
+    uint8_t attack_level;      // Attack level (0-255)
+    uint8_t attack_time;       // Attack time
+    uint8_t fade_level;        // Fade level (0-255)
+    uint8_t fade_time;         // Fade time
+    uint8_t reserved[2];
+} ffb_envelope_report_t;
+
+typedef struct {
+    uint8_t report_id;
+    uint8_t control_type;      // 0=enable actuators, 1=disable actuators, 2=stop all effects, 3=device reset, 4=device pause, 5=device continue
+    uint8_t reserved[6];
+} ffb_device_control_report_t;
+
 // Parse FFB reports according to your HID descriptor
 static int parse_ffb_report(uint8_t *report, int len, ffb_effect_t *effect) {
     if (len < 2) return 0;
@@ -66,8 +110,9 @@ static int parse_ffb_report(uint8_t *report, int len, ffb_effect_t *effect) {
                 effect->magnitude = (cf->magnitude - 128) / 128.0f;
                 effect->direction = cf->direction * 360.0f / 255.0f; // Convert to degrees
                 effect->duration = cf->duration * 10; // Convert to milliseconds
-                printf("FFB: Constant Force - ID:%d, Mag:%.2f, Dir:%.1f°\n", 
-                       effect->id, effect->magnitude, effect->direction);
+                effect->start_delay = cf->start_delay * 10; // Convert to milliseconds
+                printf("FFB: Constant Force - ID:%d, Mag:%.2f, Dir:%.1f°, Dur:%dms\n", 
+                       effect->id, effect->magnitude, effect->direction, effect->duration);
                 return 1;
             }
             break;
@@ -76,6 +121,12 @@ static int parse_ffb_report(uint8_t *report, int len, ffb_effect_t *effect) {
             if (len >= sizeof(ffb_condition_report_t)) {
                 ffb_condition_report_t *cond = (ffb_condition_report_t *)report;
                 effect->id = cond->effect_id;
+                
+                // Store all coefficients
+                effect->spring_coefficient = cond->spring_coefficient / 255.0f;
+                effect->damper_coefficient = cond->damper_coefficient / 255.0f;
+                effect->inertia_coefficient = cond->inertia_coefficient / 255.0f;
+                effect->friction_coefficient = cond->friction_coefficient / 255.0f;
                 
                 // Determine primary effect type based on strongest coefficient
                 if (cond->spring_coefficient > cond->damper_coefficient && 
@@ -90,31 +141,110 @@ static int parse_ffb_report(uint8_t *report, int len, ffb_effect_t *effect) {
                     effect->magnitude = cond->inertia_coefficient / 255.0f;
                 }
                 
-                printf("FFB: Condition Effect - ID:%d, Type:%d, Mag:%.2f\n",
-                       effect->id, effect->type, effect->magnitude);
+                printf("FFB: Condition Effect - ID:%d, Type:%d, Mag:%.2f, Spring:%.2f, Damper:%.2f\n",
+                       effect->id, effect->type, effect->magnitude, effect->spring_coefficient, effect->damper_coefficient);
                 return 1;
             }
             break;
             
         case 0x04: // Periodic Effects (Sine, Square, etc.)
-            printf("FFB: Periodic Effect received (not implemented)\n");
-            return 0;
+            if (len >= sizeof(ffb_periodic_report_t)) {
+                ffb_periodic_report_t *per = (ffb_periodic_report_t *)report;
+                effect->type = FFB_EFFECT_PERIODIC;
+                effect->id = per->effect_id;
+                effect->magnitude = per->magnitude / 255.0f;
+                effect->direction = 0.0f; // Periodic effects don't have direction in same way
+                effect->duration = 0; // Periodic effects are typically continuous
+                
+                // Store periodic-specific parameters in unused fields
+                effect->start_delay = per->waveform; // Waveform type
+                effect->timestamp = (per->frequency << 16) | (per->phase << 8) | per->offset; // Pack frequency, phase, offset
+                
+                printf("FFB: Periodic Effect - ID:%d, Waveform:%d, Mag:%.2f, Freq:%d, Phase:%d\n",
+                       effect->id, per->waveform, effect->magnitude, per->frequency, per->phase);
+                return 1;
+            }
+            break;
             
         case 0x05: // Ramp Effects  
-            printf("FFB: Ramp Effect received (not implemented)\n");
-            return 0;
+            if (len >= sizeof(ffb_ramp_report_t)) {
+                ffb_ramp_report_t *ramp = (ffb_ramp_report_t *)report;
+                effect->type = FFB_EFFECT_RAMP;
+                effect->id = ramp->effect_id;
+                effect->magnitude = ramp->start_magnitude / 255.0f;
+                effect->direction = ramp->end_magnitude / 255.0f; // Reuse direction field for end magnitude
+                effect->duration = ramp->duration * 10; // Convert to milliseconds
+                
+                printf("FFB: Ramp Effect - ID:%d, Start:%.2f, End:%.2f, Dur:%dms\n",
+                       effect->id, effect->magnitude, effect->direction, effect->duration);
+                return 1;
+            }
+            break;
             
         case 0x06: // Effect Parameters
-            printf("FFB: Effect Parameters received\n");
-            return 0;
+            if (len >= sizeof(ffb_effect_param_report_t)) {
+                ffb_effect_param_report_t *param = (ffb_effect_param_report_t *)report;
+                printf("FFB: Effect Parameters - ID:%d, Type:%d, Value:%d\n",
+                       param->effect_id, param->parameter_type, param->value);
+                
+                // Could store parameter changes but for now just log
+                // In a full implementation, you might update existing effects in the queue
+                return 0; // Not a new effect, just parameters
+            }
+            break;
             
         case 0x07: // Envelope Parameters
-            printf("FFB: Envelope Parameters received\n");
-            return 0;
+            if (len >= sizeof(ffb_envelope_report_t)) {
+                ffb_envelope_report_t *env = (ffb_envelope_report_t *)report;
+                printf("FFB: Envelope Parameters - ID:%d, Attack:%d/%d, Fade:%d/%d\n",
+                       env->effect_id, env->attack_level, env->attack_time, 
+                       env->fade_level, env->fade_time);
+                
+                // Could store envelope parameters but for now just log
+                // In a full implementation, you might update existing effects in the queue
+                return 0; // Not a new effect, just envelope
+            }
+            break;
             
         case 0x08: // Device Control
-            printf("FFB: Device Control received\n");
-            return 0;
+            if (len >= sizeof(ffb_device_control_report_t)) {
+                ffb_device_control_report_t *ctrl = (ffb_device_control_report_t *)report;
+                printf("FFB: Device Control - Type:%d ", ctrl->control_type);
+                
+                switch (ctrl->control_type) {
+                    case 0:
+                        printf("(Enable Actuators)\n");
+                        break;
+                    case 1:
+                        printf("(Disable Actuators)\n");
+                        break;
+                    case 2:
+                        printf("(Stop All Effects)\n");
+                        // Clear the effect queue
+                        pthread_mutex_lock(&queue_mutex);
+                        queue_head = queue_tail = queue_count = 0;
+                        pthread_mutex_unlock(&queue_mutex);
+                        break;
+                    case 3:
+                        printf("(Device Reset)\n");
+                        // Clear the effect queue
+                        pthread_mutex_lock(&queue_mutex);
+                        queue_head = queue_tail = queue_count = 0;
+                        pthread_mutex_unlock(&queue_mutex);
+                        break;
+                    case 4:
+                        printf("(Device Pause)\n");
+                        break;
+                    case 5:
+                        printf("(Device Continue)\n");
+                        break;
+                    default:
+                        printf("(Unknown: %d)\n", ctrl->control_type);
+                        break;
+                }
+                return 0; // Not a force effect
+            }
+            break;
             
         default:
             printf("FFB: Unknown report ID: 0x%02X\n", report_id);

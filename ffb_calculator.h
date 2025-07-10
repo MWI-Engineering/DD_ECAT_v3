@@ -6,6 +6,7 @@
 
 // FFB Effect Types - These constants are used in your hid_interface.c
 typedef enum {
+    FFB_EFFECT_NONE = 0,
     FFB_EFFECT_CONSTANT_FORCE = 1,
     FFB_EFFECT_SPRING = 2,
     FFB_EFFECT_DAMPER = 3,
@@ -14,16 +15,15 @@ typedef enum {
     FFB_EFFECT_PERIODIC = 6,
     FFB_EFFECT_RAMP = 7
 } ffb_effect_type_t;
-// Add more as needed
 
 // FFB Effect Structure
 typedef struct {
     ffb_effect_type_t type;     // Effect type (constant, spring, damper, etc.)
     uint8_t id;                 // Effect ID (0-255)
     float magnitude;            // Effect magnitude (-1.0 to 1.0 or 0.0 to 1.0)
-    float direction;            // Direction in degrees (0-360)
+    float direction;            // Direction in degrees (0-360) or repurposed for other parameters
     uint16_t duration;          // Duration in milliseconds
-    uint16_t start_delay;       // Start delay in milliseconds
+    uint16_t start_delay;       // Start delay in milliseconds or repurposed for other parameters
     
     // Additional parameters for condition effects
     float spring_coefficient;   // Spring coefficient (0.0 to 1.0)
@@ -31,8 +31,8 @@ typedef struct {
     float inertia_coefficient;  // Inertia coefficient (0.0 to 1.0)
     float friction_coefficient; // Friction coefficient (0.0 to 1.0)
     
-    // Timestamp for effect management
-    uint32_t timestamp;         // When the effect was received
+    // Timestamp for effect management and packed parameters
+    uint32_t timestamp;         // When the effect was received or packed parameters
 } ffb_effect_t;
 
 // FFB State Structure (if needed for device state)
