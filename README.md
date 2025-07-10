@@ -135,6 +135,7 @@ git clone https://github.com/Mwi93/DD_ECAT_v3.git
 
 ##### to do:
 
+- Update the create_ffb_gadget.sh so it will work = done
 - Update hid_interface.c with aditional FFB cases = done
 - Update ffb_calculator.c with the expanded ffb_calculator.h.= done
 - **Next steps:**
