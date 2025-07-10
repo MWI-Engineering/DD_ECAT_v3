@@ -8,6 +8,7 @@
 
 - I want to use a Raspberry Pi 4B, that can connect as a USB HID Joystick with FFB functionality. With the FBB commands from the game via something like: Windows.Gaming.Input.ForceFeedback.
 - Using SOEM on my raspberry pi 4B to make it a EtherCAT master that sends commands to the Synapticon ACTLINK-S servo motor.
+- I have the PDO mapping available in the .txt file.
 
 ## What i have now
 - The script: create_ffb_gadget.sh makes the Pi to show up as a USB HID. But im not sure if the FFB inputs are correct.
