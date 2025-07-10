@@ -1,27 +1,19 @@
 // hid_interface.c
+// New version with exposing the HID interface on /dev/hidg0
 #include "hid_interface.h"
 #include <stdio.h>
-#include <pthread.h> // For threading
+#include <pthread.h>
+#include <unistd.h>     // usleep, read, write
+#include <fcntl.h>      // open
+#include <stdlib.h>
+#include <string.h>     // memset
+#include <errno.h>
 
-// Add this define before including unistd.h to help with usleep declaration
-#include <unistd.h>  // For usleep
-#include <stdlib.h>  // For malloc, free
-#include <libusb-1.0/libusb.h>
+#define HID_DEVICE_PATH "/dev/hidg0"
+#define HID_REPORT_SIZE 64
 
-// --- Conceptual USB queue ---
-#define EP_OUT 0x01  // Replace with actual OUT endpoint address (Host to Device)
-#define EP_IN  0x81  // Replace with actual IN endpoint address (Device to Host)
-#define HID_REPORT_SIZE 64  // Adjust based on your HID report descriptor
-#define USB_TIMEOUT 10  // Timeout in milliseconds
+static int hidg_fd = -1;
 
-// Replace these with your actual VID and PID
-#define USB_VENDOR_ID  0x046d // Example: Logitech
-#define USB_PRODUCT_ID 0xc21d // Example: FFB Wheel
-#define USB_INTERFACE  0      // Usually 0, unless specified
-
-// --- Conceptual FFB effect queue ---
-// In a real system, this would be populated by the HID driver/library
-// receiving FFB output reports from the host PC.
 #define FFB_EFFECT_QUEUE_SIZE 10
 static ffb_effect_t ffb_effect_queue[FFB_EFFECT_QUEUE_SIZE];
 static int queue_head = 0;
@@ -33,44 +25,44 @@ static pthread_cond_t queue_cond = PTHREAD_COND_INITIALIZER;
 static int hid_running = 0;
 static pthread_t ffb_reception_thread;
 
-// USB context and device handle
-static libusb_context *usb_ctx = NULL;
-static libusb_device_handle *usb_dev_handle = NULL;
-
 // --- Private function for simulating FFB reception ---
 static void* _usb_ffb_reception_thread(void* arg) {
     uint8_t report[HID_REPORT_SIZE];
-    int transferred;
 
     while (hid_running) {
-        int rc = libusb_interrupt_transfer(
-            usb_dev_handle,
-            EP_OUT,
-            report,
-            HID_REPORT_SIZE,
-            &transferred,
-            USB_TIMEOUT
-        );
-
-        if (rc == 0 && transferred > 0) {
+        int len = read(hidg_fd, report, HID_REPORT_SIZE);
+        if (len > 0) {
             pthread_mutex_lock(&queue_mutex);
             if (queue_count < FFB_EFFECT_QUEUE_SIZE) {
-                // For now, convert report to a dummy effect
                 ffb_effect_t new_effect;
-                new_effect.type = FFB_EFFECT_CONSTANT_FORCE;
-                new_effect.magnitude = report[1] / 255.0f;  // Example scaling
-                new_effect.id = report[0];  // Or use another field
+                // Very basic FFB effect parsing
+                switch (report[0]) {
+                    case 0x01:  // Constant force
+                        new_effect.type = FFB_EFFECT_CONSTANT_FORCE;
+                        new_effect.magnitude = report[1] / 255.0f;
+                        break;
+                    case 0x02:  // Spring
+                        new_effect.type = FFB_EFFECT_SPRING;
+                        new_effect.magnitude = report[2] / 255.0f;
+                        break;
+                    case 0x03:  // Damper
+                        new_effect.type = FFB_EFFECT_DAMPER;
+                        new_effect.magnitude = report[2] / 255.0f;
+                        break;
+                    default:
+                        new_effect.type = FFB_EFFECT_CONSTANT_FORCE;
+                        new_effect.magnitude = 0.0f;
+                }
+                new_effect.id = report[0];
                 ffb_effect_queue[queue_tail] = new_effect;
                 queue_tail = (queue_tail + 1) % FFB_EFFECT_QUEUE_SIZE;
                 queue_count++;
                 pthread_cond_signal(&queue_cond);
             }
             pthread_mutex_unlock(&queue_mutex);
-        } else if (rc != LIBUSB_ERROR_TIMEOUT) {
-            fprintf(stderr, "HIDInterface: Failed to receive FFB report: %s\n", libusb_error_name(rc));
         }
 
-        usleep(1000);  // Small delay to avoid high CPU load
+        usleep(1000);
     }
 
     return NULL;
@@ -81,44 +73,13 @@ static void* _usb_ffb_reception_thread(void* arg) {
  * @return 0 on success, -1 on failure.
  */
 int hid_interface_init() {
-    int rc;
-
-    // Initialize libusb
-    rc = libusb_init(&usb_ctx);
-    if (rc < 0) {
-        fprintf(stderr, "HIDInterface: libusb_init failed: %s\n", libusb_error_name(rc));
+    hidg_fd = open(HID_DEVICE_PATH, O_RDWR | O_NONBLOCK);
+    if (hidg_fd < 0) {
+        perror("HIDInterface: Failed to open /dev/hidg0");
         return -1;
     }
 
-    // Open the device with known VID/PID
-    usb_dev_handle = libusb_open_device_with_vid_pid(usb_ctx, USB_VENDOR_ID, USB_PRODUCT_ID);
-    if (!usb_dev_handle) {
-        fprintf(stderr, "HIDInterface: Unable to open USB device (VID=0x%04x, PID=0x%04x)\n", USB_VENDOR_ID, USB_PRODUCT_ID);
-        libusb_exit(usb_ctx);
-        return -1;
-    }
-
-    // Detach kernel driver if necessary
-    if (libusb_kernel_driver_active(usb_dev_handle, USB_INTERFACE) == 1) {
-        rc = libusb_detach_kernel_driver(usb_dev_handle, USB_INTERFACE);
-        if (rc < 0) {
-            fprintf(stderr, "HIDInterface: Failed to detach kernel driver: %s\n", libusb_error_name(rc));
-            libusb_close(usb_dev_handle);
-            libusb_exit(usb_ctx);
-            return -1;
-        }
-    }
-
-    // Claim the interface
-    rc = libusb_claim_interface(usb_dev_handle, USB_INTERFACE);
-    if (rc < 0) {
-        fprintf(stderr, "HIDInterface: Failed to claim interface: %s\n", libusb_error_name(rc));
-        libusb_close(usb_dev_handle);
-        libusb_exit(usb_ctx);
-        return -1;
-    }
-
-    printf("HIDInterface: USB device initialized and interface claimed.\n");
+    printf("HIDInterface: Opened /dev/hidg0 for USB HID gadget.\n");
     return 0;
 }
 
@@ -133,7 +94,7 @@ int hid_interface_start() {
         return -1;
     }
     printf("HIDInterface: Started FFB reception thread.\n");
-    return 0; // Simulate success
+    return 0;
 }
 
 /**
@@ -145,18 +106,12 @@ void hid_interface_stop() {
         pthread_join(ffb_reception_thread, NULL);
     }
 
-    // Release USB interface and clean up
-    if (usb_dev_handle) {
-        libusb_release_interface(usb_dev_handle, USB_INTERFACE);
-        libusb_close(usb_dev_handle);
-        usb_dev_handle = NULL;
-    }
-    if (usb_ctx) {
-        libusb_exit(usb_ctx);
-        usb_ctx = NULL;
+    if (hidg_fd >= 0) {
+        close(hidg_fd);
+        hidg_fd = -1;
     }
 
-    printf("HIDInterface: Stopped and cleaned up USB.\n");
+    printf("HIDInterface: Closed /dev/hidg0 and stopped.\n");
 }
 
 /**
