@@ -109,11 +109,11 @@ git clone https://github.com/Mwi93/DD_ECAT_v3.git
 
 ##### to do:
 
-Update ffb_calculator.c with the expanded ffb_calculator.h.
-Update soem_interface.c and .h with the new ffb_calculator and hid_interfaces.
-Update main.c when all these steps are done.
+- Update ffb_calculator.c with the expanded ffb_calculator.h.
+- Update soem_interface.c and .h with the new ffb_calculator and hid_interfaces.
+- Update main.c when all these steps are done.
 
-For now use the steps in Phase 5, will update the make file when code is working.
+- For now use the steps in Phase 5, will update the make file when code is working.
 
 #### Phase 5: Install all files
 
