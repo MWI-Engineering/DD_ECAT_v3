@@ -101,6 +101,32 @@ We need a script that defines the joystick's capabilities (1 axis for steering, 
 
 - **Note to self:** Paste instructions how I made this .sh file and automatically starts up on boot.
 
+##### Automaticlly start the script
+
+- use this command: sudo nano /etc/systemd/system/ffb-gadget.service
+- Paste this:
+{
+[Unit]
+Description=Create USB Gadget for FFB Wheel
+After=network.target sys-kernel-config.mount
+Requires=sys-kernel-config.mount
+
+[Service]
+ExecStart=/usr/bin/create_ffb_gadget.sh
+Type=oneshot
+RemainAfterExit=true
+
+[Install]
+WantedBy=multi-user.target
+}
+
+- Than enable and start it:
+{sudo chmod +x /usr/bin/create_ffb_gadget.sh
+sudo systemctl daemon-reexec
+sudo systemctl enable ffb-gadget.service
+sudo reboot
+}
+
 #### Phase 4: Clone git project
 
 - Clone DD_ECAT_v3:
@@ -109,9 +135,12 @@ git clone https://github.com/Mwi93/DD_ECAT_v3.git
 
 ##### to do:
 
-- Update ffb_calculator.c with the expanded ffb_calculator.h.
+- Update hid_interface.c with aditional FFB cases = done
+- Update ffb_calculator.c with the expanded ffb_calculator.h.= done
+- **Next steps:**
 - Update soem_interface.c and .h with the new ffb_calculator and hid_interfaces.
 - Update main.c when all these steps are done.
+- Try to make the 
 
 - For now use the steps in Phase 5, will update the make file when code is working.
 
