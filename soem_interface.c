@@ -9,22 +9,22 @@
 // --- SOEM Library Includes ---
 // Ensure these paths are correct relative to your SOEM installation
 // Changed to <ethercat.h> directly as per previous discussion, assuming -I includes /home/mwi/SOEM/install/include/soem
-#include <ethercat.h>
+#include <ethercat.h> 
+#include "ethercattype.h" 
 // ethercattype.h is usually included by ethercat.h or soem_interface.h if it defines types used here
 // If it's not strictly necessary for types defined within this file, consider removing it
 // Added ethercatprint.h explicitly for ec_set_print_func, as identified in previous errors
 #include <ethercatprint.h>
-// #include "ethercattype.h" 
 // nicdrv.h, ethercatmain.h, ethercatcoe.h, ethercatfoe.h, ethercatconfig.h are generally internal to SOEM
 // and are often not directly included by application code. ethercat.h handles most of these.
 // Unless you are directly calling very low-level functions from these, it's better to rely on ethercat.h
 // to pull in what's necessary. Over-including can sometimes lead to conflicts or longer compile times.
 // For now, let's keep them if they were previously there, but be aware they might not be needed.
-#include "nicdrv.h"
-#include "ethercatmain.h"
-#include "ethercatcoe.h"
-#include "ethercatfoe.h"
-#include "ethercatconfig.h"
+//#include "nicdrv.h"
+//#include "ethercatmain.h"
+//#include "ethercatcoe.h"
+//include "ethercatfoe.h"
+//#include "ethercatconfig.h"
 
 
 // --- SOEM Global Variables ---
