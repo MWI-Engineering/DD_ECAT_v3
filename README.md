@@ -2,7 +2,7 @@
 
 ## Schematic layout 
 - Based on: https://github.com/Ultrawipf/OpenFFBoard/wiki
-![DD_ECAT_layout_v1](https://github.com/user-attachments/assets/a7c4d775-17ac-4dd2-baf8-e214e4249a90)
+- ![DD_ECAT_layout_v1](https://github.com/user-attachments/assets/eae2e943-441e-4428-8cb8-4dae76ef00f0)
 
 ## Concept idea
 
