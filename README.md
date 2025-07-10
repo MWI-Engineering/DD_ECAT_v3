@@ -7,7 +7,7 @@
 ## Concept idea
 
 - I want to use a Raspberry Pi 4B, that can connect as a USB HID Joystick with FFB functionality. With the FBB commands from the game via something like: Windows.Gaming.Input.ForceFeedback.
-- Using SOEM on my raspberry pi 4B to make it a EtherCAT master that sends commands to the Synapticon ACTLINK-S servo motor.
+- Using SOEM on my raspberry pi 4B to make it a EtherCAT master that sends commands to the Synapticon ACTLINK-S servo motor and sends the actual position (encoder value) back to SOEM.
 - I have the PDO mapping available in the PDO_mapping.txt file.
 
 ## What i have now
