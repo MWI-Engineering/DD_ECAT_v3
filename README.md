@@ -15,4 +15,21 @@
 
 ## To make it work
 - All the scripts must be compiled on the raspberry pi.
+- gcc -c soem_interface.c -o soem_interface.o -I/usr/local/include/soem
+- gcc -c hid_interface.c -o hid_interface.o
+- gcc -c ffb_calculator.c -o ffb_calculator.o
+- gcc -c main.c -o main.o
+- Link ALL the object files and necessary libraries using this:
+- gcc main.o \
+    soem_interface.o \
+    hid_interface.o \
+    ffb_calculator.o \
+    -o my_ethercat_app \
+    -L/usr/local/lib \
+    -lsoem \
+    -lpthread \
+    -lrt \
+    -lusb-1.0 \
+    -lm
+- These steps must be tested, i've not come this far yet.
 - 
