@@ -40,7 +40,7 @@ int main(int argc, char *argv[]) {
     ffb_calculator_init();
 
     // Default EtherCAT interface name
-    const char *ethercat_ifname = "eth0";
+    const char *ethercat_ifname = "eth1";
     if (argc > 1) {
         ethercat_ifname = argv[1]; // Allow specifying interface as command-line argument
     }
