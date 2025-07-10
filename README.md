@@ -21,6 +21,96 @@
 
 ## To make it work
 
+### Configure the pi
+
+#### Phase 1: Raspberry Pi Setup
+
+- Flash OS: Flash Raspberry Pi OS Lite (64-bit) to your SD card using the Raspberry Pi Imager.
+- Initial Boot & Config:
+Boot the Pi. Connect it to your network via its Ethernet port for now. SSH into it.
+Run sudo raspi-config to set your locale, timezone, and enable SSH.
+
+- Update your system:
+
+sudo apt update
+sudo apt full-upgrade -y
+
+- Install Essential Tools:
+
+sudo apt install -y build-essential git
+
+- Isolate a CPU Core (Optional but Recommended): For better real-time performance, you can dedicate a CPU core to the main control loop. Edit the boot command line:
+
+sudo nano /boot/cmdline.txt
+
+Add isolcpus=3 to the end of the line. This reserves the 4th core (core #3) for our application. Reboot after saving.
+
+#### Phase 2: EtherCAT Master Setup (SOEM)
+
+- Clone SOEM:
+cd ~
+git clone https://github.com/OpenEtherCATsociety/SOEM.git
+
+##### Build SOEM
+
+- cd SOEM
+- mkdir build
+- cd build
+- cmake ..
+- make
+- sudo make install
+
+##### Configure Network Interface
+
+The EtherCAT master needs raw socket access to the Ethernet port. We'll use eth0.
+Find your Pi's MAC address: ip a (look for link/ether under eth0).
+Connect the Synapticon drive directly to the Pi's Ethernet port. Power on the Synapticon drive (both logic and motor power).
+
+##### Test Communication
+
+SOEM comes with example tools. Let's use slaveinfo to see if the Pi can find the drive.
+Navigate to the build directory where the test executables are: ~/SOEM/build/test/linux/slaveinfo/
+Run the test. You MUST use sudo because it requires raw network access.
+
+sudo ./slaveinfo eth0
+
+If successful, you will see output like:
+SOEM (Simple Open EtherCAT Master)
+Slaveinfo
+Starting slaveinfo
+ec_init on eth0 succeeded.
+1 slaves found and configured.
+Slave 1
+ MAN: 00000abc ID: 12345678 REV: 00000001
+ State: PREOP
+ ... (more info)
+This step is critical. If it fails, do not proceed. Check your cabling, power, and network interface name.
+
+#### Phase 3: USB HID Gadget Setup
+
+This phase makes the Pi appear as a joystick to your PC.
+
+##### Enable libcomposite:
+
+- echo "dtoverlay=dwc2" | sudo tee -a /boot/config.txt
+- echo "libcomposite" | sudo tee -a /etc/modules
+
+##### Create the HID Gadget Script
+
+We need a script that defines the joystick's capabilities (1 axis for steering, FFB support). Create a file named create_ffb_gadget.sh.
+
+- **Note to self:** Paste instructions how I made this .sh file and automatically starts up on boot.
+
+#### Phase 4: Clone git project
+
+- Clone DD_ECAT_v3:
+cd ~
+git clone https://github.com/Mwi93/DD_ECAT_v3.git
+
+For now use the steps in Phase 5, will update the make file when code is working.
+
+#### Phase 5: Install all files
+
 - All the scripts must be compiled on the raspberry pi.
 - gcc -c soem_interface.c -o soem_interface.o -I/usr/local/include/soem
 - gcc -c hid_interface.c -o hid_interface.o
