@@ -9,18 +9,18 @@
  * @brief Initializes the HID interface.
  * @return 0 on success, -1 on failure.
  */
-int hid_interface_init();
+int hid_interface_init(void);
 
 /**
  * @brief Starts the HID communication threads (e.g., for receiving FFB effects).
  * @return 0 on success, -1 on failure.
  */
-int hid_interface_start();
+int hid_interface_start(void);
 
 /**
  * @brief Stops the HID communication and cleans up resources.
  */
-void hid_interface_stop();
+void hid_interface_stop(void);
 
 /**
  * @brief Retrieves the latest FFB effect from the queue.
@@ -31,7 +31,7 @@ int hid_interface_get_ffb_effect(ffb_effect_t *effect_out);
 
 /**
  * @brief Sends a gamepad report (position, buttons) to the PC.
- * @param position The current position of the steering wheel.
+ * @param position The current position of the steering wheel (-1.0 to 1.0).
  * @param buttons The state of the buttons (bitmask).
  */
 void hid_interface_send_gamepad_report(float position, unsigned int buttons);
