@@ -138,11 +138,12 @@ git clone https://github.com/Mwi93/DD_ECAT_v3.git
 - Update the create_ffb_gadget.sh so it will work = done
 - Update hid_interface.c with aditional FFB cases = done
 - Update ffb_calculator.c with the expanded ffb_calculator.h.= done
+- Update soem_interface.c and .h with the new ffb_calculator and hid_interfaces = done
+- Update main.c = done
 - **Next steps:**
-- Update soem_interface.c and .h with the new ffb_calculator and hid_interfaces.
-- Update main.c when all these steps are done.
-- Try to make the 
-
+- Check via claude.ai (pro) all files if it works all together correctly.
+- See how much work it is to make a GUI where the parameters can be adjusted. (Perhaps not possible due the files need to be compiled)
+- Try to create a good make file on the following scripts in phase 5.
 - For now use the steps in Phase 5, will update the make file when code is working.
 
 #### Phase 5: Install all files
