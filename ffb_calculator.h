@@ -2,19 +2,28 @@
 #ifndef FFB_CALCULATOR_H
 #define FFB_CALCULATOR_H
 
-// Define effect types (should match what HID sends)
-// These need to be in the header so other files can see them.
-#define FFB_EFFECT_CONSTANT_FORCE 0
-#define FFB_EFFECT_SPRING         1
-#define FFB_EFFECT_DAMPER         2
+#include <stdint.h>
+
+// FFB Effect Types - These constants are used in your hid_interface.c
+typedef enum {
+    FFB_EFFECT_CONSTANT_FORCE = 1,
+    FFB_EFFECT_SPRING = 2,
+    FFB_EFFECT_DAMPER = 3,
+    FFB_EFFECT_INERTIA = 4,
+    FFB_EFFECT_FRICTION = 5,
+    FFB_EFFECT_PERIODIC = 6,
+    FFB_EFFECT_RAMP = 7
+} ffb_effect_type_t;
 // Add more as needed
 
-// Define a simple structure for an FFB effect (conceptual)
+// FFB Effect Structure - Based on usage in your hid_interface.c
 typedef struct {
-    int type;      // e.g., 0 for constant_force, 1 for spring, etc.
-    float magnitude; // General magnitude for the effect
-    int id;        // Effect ID
-    // Add more parameters for specific effects (e.g., position for spring center, gain)
+    ffb_effect_type_t type;     // Effect type (constant, spring, damper, etc.)
+    uint8_t id;                 // Effect ID (0-255)
+    float magnitude;            // Effect magnitude (-1.0 to 1.0 or 0.0 to 1.0)
+    float direction;            // Direction in degrees (0-360)
+    uint16_t duration;          // Duration in milliseconds
+    // Add other fields as needed for your application
 } ffb_effect_t;
 
 /**
