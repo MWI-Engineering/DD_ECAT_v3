@@ -7,25 +7,12 @@
 #include <stdarg.h> // For va_list in ecat_print_func
 
 // --- SOEM Library Includes ---
-// Ensure these paths are correct relative to your SOEM installation
-// Changed to <ethercat.h> directly as per previous discussion, assuming -I includes /home/mwi/SOEM/install/include/soem
 #include <ethercat.h> 
 #include "ethercattype.h" 
-// ethercattype.h is usually included by ethercat.h or soem_interface.h if it defines types used here
-// If it's not strictly necessary for types defined within this file, consider removing it
-// Added ethercatprint.h explicitly for ec_set_print_func, as identified in previous errors
+// Try including ethercatprint.h - if this doesn't exist, we'll handle it differently
+#ifdef HAVE_ETHERCATPRINT_H
 #include <ethercatprint.h>
-// nicdrv.h, ethercatmain.h, ethercatcoe.h, ethercatfoe.h, ethercatconfig.h are generally internal to SOEM
-// and are often not directly included by application code. ethercat.h handles most of these.
-// Unless you are directly calling very low-level functions from these, it's better to rely on ethercat.h
-// to pull in what's necessary. Over-including can sometimes lead to conflicts or longer compile times.
-// For now, let's keep them if they were previously there, but be aware they might not be needed.
-//#include "nicdrv.h"
-//#include "ethercatmain.h"
-//#include "ethercatcoe.h"
-//include "ethercatfoe.h"
-//#include "ethercatconfig.h"
-
+#endif
 
 // --- SOEM Global Variables ---
 char IOmap[4096]; // Global memory for EtherCAT Process Data
@@ -161,8 +148,8 @@ OSAL_THREAD_FUNC ecat_loop(void *ptr)
             // Data received successfully.
             // You can now access the input PDOs through 'somanet_inputs'.
             // Example:
-            // printf("Slave 1 Statusword: 0x%04X\n", somanet_inputs->statusword);
-            // printf("Slave 1 Position: %d\n", somanet_inputs->position_actual_value);
+            printf("Slave 1 Statusword: 0x%04X\n", somanet_inputs->statusword);
+            printf("Slave 1 Position: %d\n", somanet_inputs->position_actual_value);
 
             // Call a function to read/update your application's input values
             // based on the received EtherCAT data.
@@ -171,7 +158,6 @@ OSAL_THREAD_FUNC ecat_loop(void *ptr)
             // Call a function to update the output values that will be sent in the next cycle.
             // This function would typically take control commands from your application.
             soem_interface_write_outputs(); // You would implement this function
-
         }
         else
         {
@@ -220,8 +206,24 @@ void ecat_print_func(const char *fmt, ...)
 int soem_interface_init_master(const char *ifname) {
     printf("SOEM_Interface: Initializing EtherCAT master for interface %s...\n", ifname);
 
-    // Set SOEM print function for debugging
-    ec_set_print_func(ecat_print_func);
+    // Try to set SOEM print function for debugging - handle different SOEM versions
+    #ifdef HAVE_ETHERCATPRINT_H
+        // If ethercatprint.h exists, try ec_set_print_func
+        #ifdef ec_set_print_func
+            ec_set_print_func(ecat_print_func);
+        #endif
+    #else
+        // Alternative: Some SOEM versions might have this function directly in ethercat.h
+        // or it might be called differently. Let's try a few common variations:
+        #ifdef ec_printHook
+            ec_printHook = ecat_print_func;
+        #elif defined(ec_set_print_hook)
+            ec_set_print_hook(ecat_print_func);
+        #endif
+    #endif
+    
+    // If none of the above work, you can comment out the print function setup
+    // and SOEM will use its default printing behavior
     
     // Initialize SOEM master
     if (ec_init(ifname)) {
