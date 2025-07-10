@@ -16,15 +16,33 @@ typedef enum {
 } ffb_effect_type_t;
 // Add more as needed
 
-// FFB Effect Structure - Based on usage in your hid_interface.c
+// FFB Effect Structure
 typedef struct {
     ffb_effect_type_t type;     // Effect type (constant, spring, damper, etc.)
     uint8_t id;                 // Effect ID (0-255)
     float magnitude;            // Effect magnitude (-1.0 to 1.0 or 0.0 to 1.0)
     float direction;            // Direction in degrees (0-360)
     uint16_t duration;          // Duration in milliseconds
-    // Add other fields as needed for your application
+    uint16_t start_delay;       // Start delay in milliseconds
+    
+    // Additional parameters for condition effects
+    float spring_coefficient;   // Spring coefficient (0.0 to 1.0)
+    float damper_coefficient;   // Damper coefficient (0.0 to 1.0)
+    float inertia_coefficient;  // Inertia coefficient (0.0 to 1.0)
+    float friction_coefficient; // Friction coefficient (0.0 to 1.0)
+    
+    // Timestamp for effect management
+    uint32_t timestamp;         // When the effect was received
 } ffb_effect_t;
+
+// FFB State Structure (if needed for device state)
+typedef struct {
+    uint8_t device_paused;      // Device is paused
+    uint8_t actuators_enabled;  // Actuators are enabled
+    // uint8_t safety_switch;   // Safety switch state, not needed for Synapticon servomotor due to intergrated safety circuit, adjust if needed.
+    uint8_t actuator_override;  // Actuator override switch
+    uint8_t actuator_power;     // Actuator power level (0-100)
+} ffb_device_state_t;
 
 /**
  * @brief Initializes the FFB calculator.
