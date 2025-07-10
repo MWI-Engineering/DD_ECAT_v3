@@ -148,12 +148,12 @@ git clone https://github.com/Mwi93/DD_ECAT_v3.git
 #### Phase 5: Install all files
 
 - All the scripts must be compiled on the raspberry pi.
-- gcc -c soem_interface.c -o soem_interface.o -I/usr/local/include/soem
-- gcc -c hid_interface.c -o hid_interface.o
-- gcc -c ffb_calculator.c -o ffb_calculator.o
-- gcc -c main.c -o main.o
+- sudo gcc -c soem_interface.c -o soem_interface.o -I/usr/local/include/soem
+- sudo gcc -c hid_interface.c -o hid_interface.o
+- sudo gcc -c ffb_calculator.c -o ffb_calculator.o
+- sudo gcc -c main.c -o main.o
 - Link ALL the object files and necessary libraries using this:
-- gcc main.o \
+- sudo gcc main.o \
     soem_interface.o \
     hid_interface.o \
     ffb_calculator.o \
