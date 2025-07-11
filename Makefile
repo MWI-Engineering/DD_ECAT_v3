@@ -21,7 +21,7 @@ CFLAGS = -Wall -Wextra -g -std=c11 -O2 -D_GNU_SOURCE -D_USE_MATH_DEFINES
 LDFLAGS = -lrt -lpthread -lm -lethercat
 
 # --- Project Files ---
-TARGET = my_ffb_app
+TARGET = ffb_app
 SRCS = main.c ffb_calculator.c hid_interface.c soem_interface.c
 OBJS = $(SRCS:.c=.o) # Automatically generate .o file names from .c file names
 
