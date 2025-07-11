@@ -205,7 +205,7 @@ int soem_interface_init_master(const char *ifname) {
                 // Read initial drive status before sending controlword
                 ec_send_processdata();
                 wkc = ec_receive_processdata(EC_TIMEOUTRET);
-                printf("Current wkc =\n", wkc);
+                printf("SOEM_Interface: Current wkc =\n", ec_receive_processdata(EC_TIMEOUTRET));
                 if (wkc >= expectedWKC && somanet_inputs) {
                 printf("SOEM_Interface: Initial drive state before controlword sequence:\n");
                 printf("  Statusword: 0x%04X\n", somanet_inputs->statusword);
