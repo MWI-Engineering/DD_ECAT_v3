@@ -19,7 +19,7 @@ CFLAGS = -Wall -Wextra -g -std=c11 -O2 -D_GNU_SOURCE -D_USE_MATH_DEFINES -I/home
 #   -lm: Math library [cite: 2]
 #   -lethercat: SOEM EtherCAT library [cite: 2]
 #   -L/home/mwi/SOEM/install/lib: Add this line for SOEM library path
-LDFLAGS = -lrt -lpthread -lm -lethercat -L/home/mwi/SOEM/install/lib
+LDFLAGS = -lrt -lpthread -lm # -lethercat -L/home/mwi/SOEM/install/lib
 
 # --- Project Files ---
 TARGET = ffb_app
