@@ -86,20 +86,41 @@ Slave 1
  ... (more info)
 This step is critical. If it fails, do not proceed. Check your cabling, power, and network interface name.
 
-#### Phase 3: USB HID Gadget Setup
+#### Phase 3: Clone git project
+
+- Clone DD_ECAT_v3:
+- cd ~
+- git clone https://github.com/Mwi93/DD_ECAT_v3.git
+- cd DD_ECAT_v3
+- make
+- Check if the ffb_app is made correctly
+
+##### to do:
+
+- Update the create_ffb_gadget.sh so it will work = done
+- Update hid_interface.c with aditional FFB cases = done
+- Update ffb_calculator.c with the expanded ffb_calculator.h.= done
+- Update soem_interface.c and .h with the new ffb_calculator and hid_interfaces = done
+- Update main.c = done
+- **Next steps:**
+- Check via claude.ai (pro) all files if it works all together correctly.
+
+#### Phase 4: USB HID Gadget Setup
 
 This phase makes the Pi appear as a joystick to your PC.
 
 ##### Enable libcomposite:
-
+- cd ~
 - echo "dtoverlay=dwc2" | sudo tee -a /boot/config.txt
 - echo "libcomposite" | sudo tee -a /etc/modules
 
 ##### Create the HID Gadget Script
 
-We need a script that defines the joystick's capabilities (1 axis for steering, FFB support). Create a file named create_ffb_gadget.sh.
+We need a script that defines the joystick's capabilities (1 axis for steering, FFB support). Copy the file named create_ffb_gadget.sh to the correct location.
 
-- **Note to self:** Paste instructions how I made this .sh file and automatically starts up on boot.
+- cd DD_ECAT_v3
+- sudo cp ./create_ffb_gadgetsh /usr/bin/create_ffb_gadget.sh
+- sudo chmod +x /usr/bin/create_ffb_gadget.sh
 
 ##### Automaticlly start the script
 
@@ -127,42 +148,9 @@ sudo systemctl enable ffb-gadget.service
 sudo reboot
 }
 
-#### Phase 4: Clone git project
+#### Phase 5: Compile all files
 
-- Clone DD_ECAT_v3:
-cd ~
-git clone https://github.com/Mwi93/DD_ECAT_v3.git
-
-##### to do:
-
-- Update the create_ffb_gadget.sh so it will work = done
-- Update hid_interface.c with aditional FFB cases = done
-- Update ffb_calculator.c with the expanded ffb_calculator.h.= done
-- Update soem_interface.c and .h with the new ffb_calculator and hid_interfaces = done
-- Update main.c = done
-- **Next steps:**
-- Check via claude.ai (pro) all files if it works all together correctly.
-- See how much work it is to make a GUI where the parameters can be adjusted. (Perhaps not possible due the files need to be compiled)
-- Try to create a good make file on the following scripts in phase 5.
-- For now use the steps in Phase 5, will update the make file when code is working.
-
-#### Phase 5: Install all files
-
-- All the scripts must be compiled on the raspberry pi.
-- sudo gcc -c soem_interface.c -o soem_interface.o -I/usr/local/include/soem
-- sudo gcc -c hid_interface.c -o hid_interface.o
-- sudo gcc -c ffb_calculator.c -o ffb_calculator.o
-- sudo gcc -c main.c -o main.o
-- Link ALL the object files and necessary libraries using this:
-- sudo gcc main.o \
-    soem_interface.o \
-    hid_interface.o \
-    ffb_calculator.o \
-    -o my_ethercat_app \
-    -L/usr/local/lib \
-    -lsoem \
-    -lpthread \
-    -lrt \
-    -lusb-1.0 \
-    -lm
-- These steps must be tested, i've not come this far yet.
+- cd DD_ECAT_v3
+- make
+- If correctly installed:
+- ./ffb_app eth1 
