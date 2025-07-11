@@ -174,15 +174,36 @@ int soem_interface_init_master(const char *ifname) {
                 // Map PDOs for all slaves
                 ec_config_map(&IOmap[0]);
                 
-                // Wait for slaves to enter SAFE_OP state
-                ec_statecheck(0, EC_STATE_SAFE_OP, EC_TIMEOUTSTATE);
-                usleep(500000); // Wait 500ms to ensure slave settles into SAFE_OP
+         // Wait until all slaves reach SAFE_OP state
+             printf("SOEM_Interface: Waiting for all slaves to reach SAFE_OP...\n");
 
+            int wait_count = 0;
+            const int max_waits = 50; // e.g., wait up to 5 seconds (50 * 100ms)
+
+            do {
+                 ec_statecheck(0, EC_STATE_SAFE_OP, EC_TIMEOUTSTATE);
+
+                int all_safe_op = 1;
                 for (int i = 1; i <= ec_slavecount; i++) {
-                  printf("SOEM_Interface: Slave %d state: 0x%02X\n", i, ec_slave[i].state);
-                if (ec_slave[i].state != EC_STATE_SAFE_OP) {
-                    printf("  Warning: Slave %d is not in SAFE_OP state yet.\n", i);
+                    if (ec_slave[i].state != EC_STATE_SAFE_OP) {
+                   printf("  Slave %d not in SAFE_OP (state: 0x%02X)\n", i, ec_slave[i].state);
+                   all_safe_op = 0;
                     }
+                }
+
+                if (all_safe_op) {
+                 printf("SOEM_Interface: All slaves are in SAFE_OP.\n");
+                 break;
+                }
+
+                usleep(100000); // Wait 100ms
+                wait_count++;
+                } while (wait_count < max_waits);
+
+                if (wait_count >= max_waits) {
+                    fprintf(stderr, "SOEM_Interface: Timeout waiting for SAFE_OP state.\n");
+                    ec_close();
+                    return -1;
                 }
 
                 // Calculate expected working counter
