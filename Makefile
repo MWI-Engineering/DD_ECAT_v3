@@ -8,10 +8,8 @@ CC = gcc
 #   -g: Include debugging information [cite: 1]
 #   -std=c11: Use C11 standard [cite: 1]
 #   -O2: Optimization level 2 (you can adjust this, e.g., -O0 for no optimization during debugging) [cite: 1]
-#   -D_GNU_SOURCE: Define _GNU_SOURCE for specific GNU extensions (like `gettimeofday` on some systems) [cite: 1]
-#   -D_USE_MATH_DEFINES: Define _USE_MATH_DEFINES for M_PI on Windows compatibility (though Raspberry Pi is Linux) [cite: 1]
 #   -I/home/mwi/SOEM/install/include/soem: Add this line for SOEM headers
-CFLAGS = -Wall -Wextra -g -std=c11 -O2 -D_GNU_SOURCE -D_USE_MATH_DEFINES -I/home/mwi/SOEM/install/
+CFLAGS = -Wall -Wextra -g -std=c11 -O2 -I/home/mwi/SOEM/install/include
 
 # LDFLAGS: Linker flags - specify libraries [cite: 2]
 #   -lrt: Real-time extensions library (for clock_gettime) [cite: 2]
