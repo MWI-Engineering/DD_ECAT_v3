@@ -1,45 +1,53 @@
-# Makefile for Raspberry Pi FFB Steering Wheel Project
+# Makefile for Force Feedback Project on Raspberry Pi
 
-# Compiler
+# --- Compiler and Flags ---
 CC = gcc
+# CFLAGS:
+#   -Wall: Enable all common warnings
+#   -Wextra: Enable extra warnings
+#   -g: Include debugging information
+#   -std=c11: Use C11 standard
+#   -O2: Optimization level 2 (you can adjust this, e.g., -O0 for no optimization during debugging)
+#   -D_GNU_SOURCE: Define _GNU_SOURCE for specific GNU extensions (like `gettimeofday` on some systems)
+#   -D_USE_MATH_DEFINES: Define _USE_MATH_DEFINES for M_PI on Windows compatibility (though Raspberry Pi is Linux)
+CFLAGS = -Wall -Wextra -g -std=c11 -O2 -D_GNU_SOURCE -D_USE_MATH_DEFINES
 
-# Compiler flags
-# -Wall: Enable all standard warnings
-# -O2: Optimization level 2
-# -std=c11: Use C11 standard
-# -pthread: Link with POSIX threads library
-# -I.: Add current directory to include paths
-# -I/home/mwi/SOEM/install/include/soem: Corrected SOEM include path
-# -D_POSIX_C_SOURCE=200809L: Required for clock_gettime on some systems
-# Add _DEFAULT_SOURCE to ensure usleep is declared, if needed by your glibc version
-CFLAGS = -Wall -O2 -std=c11 -pthread -I. -I/home/mwi/SOEM/install/include/soem -D_DEFAULT_SOURCE -DEC_VERBOSENOGUI
+# LDFLAGS: Linker flags - specify libraries
+#   -lrt: Real-time extensions library (for clock_gettime)
+#   -lpthread: POSIX threads library
+#   -lm: Math library
+#   -lethercat: SOEM EtherCAT library
+#   -L/usr/local/lib: (Optional) If your SOEM library is in a non-standard path, add -L path/to/soem/lib
+LDFLAGS = -lrt -lpthread -lm -lethercat
 
-# Linker flags
-# -L/home/mwi/SOEM/install/lib: Add SOEM library path
-# -lsoem: Link with SOEM library
-# -lrt: Link with real-time library (for clock_gettime)
-# -lpcap: SOEM often depends on libpcap for raw socket access
-# -lusb-1.0: Example for libusb (if used for HID)
-LDFLAGS = -L/home/mwi/SOEM/install/lib -lrt -lsoem -lpcap
-
-# Source files
+# --- Project Files ---
+TARGET = my_ffb_app
 SRCS = main.c ffb_calculator.c hid_interface.c soem_interface.c
+OBJS = $(SRCS:.c=.o) # Automatically generate .o file names from .c file names
 
-# Object files
-OBJS = $(SRCS:.c=.o)
+# --- Rules ---
 
-# Executable name
-TARGET = FF_DD
-
-.PHONY: all clean
-
+# Default rule: builds the target executable
 all: $(TARGET)
 
+# Rule to link the object files into the executable
 $(TARGET): $(OBJS)
+	@echo "Linking $(TARGET)..."
 	$(CC) $(OBJS) -o $(TARGET) $(LDFLAGS)
+	@echo "Build complete: $(TARGET) created."
 
+# Generic rule to compile .c files into .o files
+# $<: the first prerequisite (e.g., main.c)
+# $@: the target of the rule (e.g., main.o)
 %.o: %.c
+	@echo "Compiling $<..."
 	$(CC) $(CFLAGS) -c $< -o $@
 
+# Clean rule: removes all generated object files and the executable
 clean:
+	@echo "Cleaning up..."
 	rm -f $(OBJS) $(TARGET)
+	@echo "Clean complete."
+
+# Phony targets: tell make that these are not actual files
+.PHONY: all clean
