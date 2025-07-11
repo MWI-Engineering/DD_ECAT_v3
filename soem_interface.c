@@ -174,6 +174,10 @@ int soem_interface_init_master(const char *ifname) {
                 // Map PDOs for all slaves
                 ec_config_map(&IOmap[0]);
                 
+                // Wait for slaves to enter SAFE_OP state
+                ec_statecheck(0, EC_STATE_SAFE_OP, EC_TIMEOUTSTATE);
+                usleep(500000); // Wait 500ms to ensure slave settles into SAFE_OP
+
                 // Calculate expected working counter
                 expectedWKC = (ec_group[0].outputsWKC * 2) + ec_group[0].inputsWKC;
                 printf("SOEM_Interface: Expected working counter: %d\n", expectedWKC);
@@ -205,7 +209,6 @@ int soem_interface_init_master(const char *ifname) {
                 // Read initial drive status before sending controlword
                 ec_send_processdata();
                 wkc = ec_receive_processdata(EC_TIMEOUTRET);
-                printf("SOEM_Interface: Current wkc =\n", ec_receive_processdata(EC_TIMEOUTRET));
                 if (wkc >= expectedWKC && somanet_inputs) {
                 printf("SOEM_Interface: Initial drive state before controlword sequence:\n");
                 printf("  Statusword: 0x%04X\n", somanet_inputs->statusword);
