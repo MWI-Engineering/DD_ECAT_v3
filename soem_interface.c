@@ -178,6 +178,13 @@ int soem_interface_init_master(const char *ifname) {
                 ec_statecheck(0, EC_STATE_SAFE_OP, EC_TIMEOUTSTATE);
                 usleep(500000); // Wait 500ms to ensure slave settles into SAFE_OP
 
+                for (int i = 1; i <= ec_slavecount; i++) {
+                  printf("SOEM_Interface: Slave %d state: 0x%02X\n", i, ec_slave[i].state);
+                if (ec_slave[i].state != EC_STATE_SAFE_OP) {
+                    printf("  Warning: Slave %d is not in SAFE_OP state yet.\n", i);
+                    }
+                }
+
                 // Calculate expected working counter
                 expectedWKC = (ec_group[0].outputsWKC * 2) + ec_group[0].inputsWKC;
                 printf("SOEM_Interface: Expected working counter: %d\n", expectedWKC);
