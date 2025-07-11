@@ -202,8 +202,23 @@ int soem_interface_init_master(const char *ifname) {
                 // Clear output PDOs initially
                 memset(somanet_outputs, 0, sizeof(SomanetOutputs_t));
 
+                // Read initial drive status before sending controlword
+                ec_send_processdata();
+                wkc = ec_receive_processdata(EC_TIMEOUTRET);
+                if (wkc >= expectedWKC && somanet_inputs) {
+                printf("SOEM_Interface: Initial drive state before controlword sequence:\n");
+                printf("  Statusword: 0x%04X\n", somanet_inputs->statusword);
+                printf("  Modes of Operation Display: 0x%02X\n", somanet_inputs->modes_of_operation_disp);
+                printf("  Position: %d\n", somanet_inputs->position_actual_value);
+                printf("  Velocity: %d\n", somanet_inputs->velocity_actual_value);
+                printf("  Torque: %d\n", somanet_inputs->torque_actual_value);
+                
+                } else {
+                fprintf(stderr, "SOEM_Interface: Failed to read initial drive state (WKC: %d, expected: %d).\n", wkc, expectedWKC);
+                }
+
                 // Initialize drive state machine
-                printf("SOEM_Interface: Initializing drive state machine...\n");
+                printf("SOEM_Interface: Initializing drive state machine...\n");               
                 
                 // Set Modes of Operation to Cyclic Synchronous Torque (CST)
                 somanet_outputs->modes_of_operation = 0x0A; // CST mode
