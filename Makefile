@@ -46,8 +46,8 @@ $(TARGET): $(OBJS)
 
 # Clean rule: removes all generated object files and the executable
 clean:
-	@echo "Cleaning up..."
-	rm -f $(OBJS) $(TARGET)
-	[cite_start]@echo "Clean complete." [cite: 4]
-# [cite_start]Phony targets: tell make that these are not actual files [cite: 4]
-[cite_start].PHONY: all clean [cite: 4]
+    @echo "Cleaning up..."
+    rm -f $(OBJS) $(TARGET)
+    @echo "Clean complete."
+# Phony targets: tell make that these are not actual files
+.PHONY: all clean
