@@ -13,7 +13,7 @@ CC = gcc
 #   -I/home/mwi/SOEM/install/include/soem: Add this line for SOEM headers
 CFLAGS = -Wall -Wextra -g -std=c11 -O2 -D_GNU_SOURCE -D_USE_MATH_DEFINES -I/home/mwi/SOEM/install/include/soem
 
-# [cite_start]LDFLAGS: Linker flags - specify libraries [cite: 2]
+# LDFLAGS: Linker flags - specify libraries [cite: 2]
 #   [cite_start]-lrt: Real-time extensions library (for clock_gettime) [cite: 2]
 #   [cite_start]-lpthread: POSIX threads library [cite: 2]
 #   [cite_start]-lm: Math library [cite: 2]
@@ -46,8 +46,8 @@ $(TARGET): $(OBJS)
 
 # Clean rule: removes all generated object files and the executable
 clean:
-    @echo "Cleaning up..."
-    rm -f $(OBJS) $(TARGET)
-    @echo "Clean complete."
-# Phony targets: tell make that these are not actual files
-.PHONY: all clean
+	@echo "Cleaning up..."
+	rm -f $(OBJS) $(TARGET)
+	[cite_start]@echo "Clean complete." [cite: 4]
+# [cite_start]Phony targets: tell make that these are not actual files [cite: 4]
+[cite_start].PHONY: all clean [cite: 4]
