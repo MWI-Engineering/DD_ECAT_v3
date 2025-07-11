@@ -11,7 +11,7 @@ CC = gcc
 #   -D_GNU_SOURCE: Define _GNU_SOURCE for specific GNU extensions (like `gettimeofday` on some systems) [cite: 1]
 #   -D_USE_MATH_DEFINES: Define _USE_MATH_DEFINES for M_PI on Windows compatibility (though Raspberry Pi is Linux) [cite: 1]
 #   -I/home/mwi/SOEM/install/include/soem: Add this line for SOEM headers
-CFLAGS = -Wall -Wextra -g -std=c11 -O2 -D_GNU_SOURCE -D_USE_MATH_DEFINES -I/home/mwi/SOEM/install/include/soem
+CFLAGS = -Wall -Wextra -g -std=c11 -O2 -D_GNU_SOURCE -D_USE_MATH_DEFINES -I/home/mwi/SOEM/install/
 
 # LDFLAGS: Linker flags - specify libraries [cite: 2]
 #   -lrt: Real-time extensions library (for clock_gettime) [cite: 2]
@@ -19,7 +19,7 @@ CFLAGS = -Wall -Wextra -g -std=c11 -O2 -D_GNU_SOURCE -D_USE_MATH_DEFINES -I/home
 #   -lm: Math library [cite: 2]
 #   -lethercat: SOEM EtherCAT library [cite: 2]
 #   -L/home/mwi/SOEM/install/lib: Add this line for SOEM library path
-LDFLAGS = -lrt -lpthread -lm # -lethercat -L/home/mwi/SOEM/install/lib
+LDFLAGS = -lrt -lpthread -lm -lethercat -L/home/mwi/SOEM/install/lib
 
 # --- Project Files ---
 TARGET = ffb_app
