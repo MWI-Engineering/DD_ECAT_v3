@@ -169,6 +169,17 @@ int soem_interface_init_master(const char *ifname) {
         // Find and configure slaves
         if (ec_config_init(FALSE) > 0) {
             printf("SOEM_Interface: %d slaves found and configured.\n", ec_slavecount);
+            
+            //Compare Ibytes and Obytes
+            for (int i = 1; i <= ec_slavecount; i++) {
+                printf("Slave %d: name = %s\n", i, ec_slave[i].name);
+                printf("  Input size: %d bytes\n", ec_slave[i].Ibytes);
+                printf("  Output size: %d bytes\n", ec_slave[i].Obytes);
+                printf("  State: 0x%02X\n", ec_slave[i].state);
+            }
+
+            printf("Expected input size: %zu, output size: %zu\n",
+            sizeof(SomanetInputs_t), sizeof(SomanetOutputs_t));
 
             if (ec_slavecount >= 1) {
                 // Map PDOs for all slaves
