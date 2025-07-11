@@ -9,8 +9,8 @@
 // Include your existing headers
 #include "hid_interface.h"
 #include "udp_communication.h"
-// #include "soem_interface.h"    // Your EtherCAT interface
-// #include "ffb_calculator.h"    // Your FFB calculation engine
+#include "soem_interface.h"    // Your EtherCAT interface
+#include "ffb_calculator.h"    // Your FFB calculation engine
 // #include "motor_control.h"     // Your motor control interface
 
 // Global variables
