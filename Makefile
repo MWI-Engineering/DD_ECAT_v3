@@ -10,15 +10,16 @@ CC = gcc
 #   -O2: Optimization level 2 (you can adjust this, e.g., -O0 for no optimization during debugging)
 #   -D_GNU_SOURCE: Define _GNU_SOURCE for specific GNU extensions (like `gettimeofday` on some systems)
 #   -D_USE_MATH_DEFINES: Define _USE_MATH_DEFINES for M_PI on Windows compatibility (though Raspberry Pi is Linux)
-CFLAGS = -Wall -Wextra -g -std=c11 -O2 -D_GNU_SOURCE -D_USE_MATH_DEFINES
+#   -I/home/mwi/SOEM/install/include/soem: Add this line for SOEM headers
+CFLAGS = -Wall -Wextra -g -std=c11 -O2 -D_GNU_SOURCE -D_USE_MATH_DEFINES -I/home/mwi/SOEM/install/include/soem
 
-# LDFLAGS: Linker flags - specify libraries
-#   -lrt: Real-time extensions library (for clock_gettime)
-#   -lpthread: POSIX threads library
-#   -lm: Math library
-#   -lethercat: SOEM EtherCAT library
-#   -L/usr/local/lib: (Optional) If your SOEM library is in a non-standard path, add -L path/to/soem/lib
-LDFLAGS = -lrt -lpthread -lm -lethercat
+# [cite_start]LDFLAGS: Linker flags - specify libraries [cite: 2]
+#   [cite_start]-lrt: Real-time extensions library (for clock_gettime) [cite: 2]
+#   [cite_start]-lpthread: POSIX threads library [cite: 2]
+#   [cite_start]-lm: Math library [cite: 2]
+#   [cite_start]-lethercat: SOEM EtherCAT library [cite: 2]
+#   -L/home/mwi/SOEM/install/lib: Add this line for SOEM library path
+LDFLAGS = -lrt -lpthread -lm -lethercat -L/home/mwi/SOEM/install/lib
 
 # --- Project Files ---
 TARGET = ffb_app
@@ -34,7 +35,7 @@ all: $(TARGET)
 $(TARGET): $(OBJS)
 	@echo "Linking $(TARGET)..."
 	$(CC) $(OBJS) -o $(TARGET) $(LDFLAGS)
-	@echo "Build complete: $(TARGET) created."
+	[cite_start]@echo "Build complete: $(TARGET) created." [cite: 3]
 
 # Generic rule to compile .c files into .o files
 # $<: the first prerequisite (e.g., main.c)
@@ -47,7 +48,6 @@ $(TARGET): $(OBJS)
 clean:
 	@echo "Cleaning up..."
 	rm -f $(OBJS) $(TARGET)
-	@echo "Clean complete."
-
-# Phony targets: tell make that these are not actual files
-.PHONY: all clean
+	[cite_start]@echo "Clean complete." [cite: 4]
+# [cite_start]Phony targets: tell make that these are not actual files [cite: 4]
+[cite_start].PHONY: all clean [cite: 4]
