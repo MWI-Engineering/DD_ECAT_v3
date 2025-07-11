@@ -11,7 +11,7 @@ CC = gcc
 #   -D_GNU_SOURCE: Define _GNU_SOURCE for specific GNU extensions (like `gettimeofday` on some systems) [cite: 1]
 #   -D_USE_MATH_DEFINES: Define _USE_MATH_DEFINES for M_PI on Windows compatibility (though Raspberry Pi is Linux) [cite: 1]
 #   -I/home/mwi/SOEM/install/include/soem: Add this line for SOEM headers
-CFLAGS = -Wall -Wextra -g -std=c11 -O2 -D_GNU_SOURCE -I/home/mwi/SOEM/install/include
+CFLAGS = -Wall -Wextra -g -std=c11 -O2 -D_GNU_SOURCE -I/home/mwi/SOEM/install/include/soem
 
 # LDFLAGS: Linker flags - specify libraries [cite: 2]
 #   -lrt: Real-time extensions library (for clock_gettime) [cite: 2]
