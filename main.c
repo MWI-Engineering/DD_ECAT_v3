@@ -7,6 +7,7 @@
 #include <string.h> // For memset
 #include <math.h>   // For fabs()
 #include <limits.h> // For LONG_MAX
+// Include libaries of this application
 #include "hid_interface.h"
 #include "ffb_calculator.h"
 #include "soem_interface.h"
