@@ -8,7 +8,7 @@
 #include <math.h>   // For scaling calculations
 
 // --- SOEM Library Includes ---
-#include <ethercat.h> 
+#include "ethercat.h"
 #include "ethercattype.h" 
 
 // --- SOEM Global Variables ---
