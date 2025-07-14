@@ -4,14 +4,15 @@
 CC = gcc
 
 # Compiler flags
-#   -I/home/mwi/DD_ECAT_v3: Add this line for HID interface
-CFLAGS = -Wall -Wextra -pthread -I/home/mwi/DD_ECAT_v3
+
+CFLAGS = -Wall -Wextra -pthread 
 
 # Linker flags
 LDFLAGS = -lpthread -ljson-c -lm
 
 # Source files
-SRCS = main_integration.c udp_communication.c hid_interface.c
+#   -I/home/mwi/DD_ECAT_v3: Add this line for HID interface
+SRCS = main_integration.c udp_communication.c hid_interface.c -I/home/mwi/DD_ECAT_v3
 
 # Object files
 OBJS = $(SRCS:.c=.o)
