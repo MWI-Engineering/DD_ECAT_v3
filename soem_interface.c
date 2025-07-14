@@ -111,8 +111,8 @@ void *ecat_loop(void *ptr) {
             // printf("SOEM_Interface: WKC mismatch: %d/%d\n", wkc, expectedWKC);
         }
 
-        // Check slave state
-        if (ec_slave[slave_idx].state != EC_STATE_OPERATIONAL) {
+        // Check slave state - use bitwise check for operational state
+        if ((ec_slave[slave_idx].state & EC_STATE_OPERATIONAL) != EC_STATE_OPERATIONAL) {
             // printf("SOEM_Interface: Slave %d not in OP state, current state: %d\n", slave_idx, ec_slave[slave_idx].state);
             ec_statecheck(slave_idx, EC_STATE_OPERATIONAL, EC_TIMEOUTSTATE);
         }
@@ -148,7 +148,7 @@ int soem_interface_write_sdo(uint16_t slave_idx, uint16_t index, uint8_t subinde
 // @param slave_idx The index of the slave (1-based).
 // @param desired_state The target EtherCAT state (e.g., EC_STATE_PRE_OP, EC_STATE_OPERATIONAL).
 // @return 0 on success, -1 on failure.
-int soem_interface_set_ethercat_state(uint16_t slave_idx, ec_state desired_state) {
+int soem_interface_set_ethercat_state(uint16_t slave_idx, ec_state desired_state) { // Changed ec_state_t to ec_state
     int wkc_state;
     printf("SOEM_Interface: Attempting to set slave %u to state %d...\n", slave_idx, desired_state);
     ec_slave[slave_idx].state = desired_state;
@@ -256,6 +256,7 @@ int soem_interface_configure_pdo_mapping(uint16_t slave_idx, uint16_t pdo_assign
 cleanup:
     // Transition back to Operational state
     printf("SOEM_Interface: Attempting to transition back to Operational state...\n");
+    // Check if the slave is in operational state (allowing for ACK_STATE bit)
     if (soem_interface_set_ethercat_state(slave_idx, EC_STATE_OPERATIONAL) != 0) {
         fprintf(stderr, "SOEM_Interface: Failed to transition back to Operational state.\n");
         ret = -1; // Indicate failure even if PDO mapping was partially successful
@@ -380,7 +381,8 @@ int soem_interface_init(const char *ifname) {
             printf("SOEM_Interface: Requesting Operational state for all slaves...\n");
             ec_statecheck(0, EC_STATE_OPERATIONAL, EC_TIMEOUTSTATE * 3); // Wait longer for all slaves
 
-            if (ec_slave[0].state == EC_STATE_OPERATIONAL) {
+            // Use bitwise check for operational state
+            if ((ec_slave[0].state & EC_STATE_OPERATIONAL) == EC_STATE_OPERATIONAL) {
                 printf("SOEM_Interface: All slaves are in Operational state.\n");
                 master_initialized = 1;
                 ecat_thread_running = 1;
@@ -392,7 +394,7 @@ int soem_interface_init(const char *ifname) {
                     return -1;
                 }
             } else {
-                fprintf(stderr, "SOEM_Interface: Not all slaves reached Operational state.\n");
+                fprintf(stderr, "SOEM_Interface: Not all slaves reached Operational state. Current state: %d\n", ec_slave[0].state);
                 for (i = 1; i <= ec_slavecount; i++) {
                     printf("SOEM_Interface: Slave %d: Current State=%d\n", i, ec_slave[i].state);
                 }
@@ -473,4 +475,3 @@ void soem_interface_stop_master() {
         printf("SOEM_Interface: EtherCAT master stopped.\n");
     }
 }
-
