@@ -85,7 +85,7 @@ void ecat_print_func(const char *fmt, ...)
     va_end(args);
 }
 
-// PDO configuration function for SOMANET - Robust version with complete configuration
+// PDO configuration function for SOMANET - Fixed version with correct ec_SDOread calls
 int configure_somanet_pdo(uint16 slave)
 {
     int retval = 0;
@@ -269,24 +269,29 @@ int configure_somanet_pdo(uint16 slave)
     // Small delay to allow device to process configuration
     usleep(50000); // 50ms delay
     
-    // Read back some configuration to verify
+    // Read back some configuration to verify - FIXED: Added size parameter
     uint16 read_val;
-    wkc_result = ec_SDOread(slave, 0x1C12, 0x00, FALSE, &read_val, EC_TIMEOUTRXM);
+    int read_size = sizeof(read_val);
+    
+    wkc_result = ec_SDOread(slave, 0x1C12, 0x00, FALSE, &read_size, &read_val, EC_TIMEOUTRXM);
     if (wkc_result > 0) {
         printf("SOEM_Interface: Verification - RxPDO assignments: %d\n", read_val);
     }
     
-    wkc_result = ec_SDOread(slave, 0x1C13, 0x00, FALSE, &read_val, EC_TIMEOUTRXM);
+    read_size = sizeof(read_val);
+    wkc_result = ec_SDOread(slave, 0x1C13, 0x00, FALSE, &read_size, &read_val, EC_TIMEOUTRXM);
     if (wkc_result > 0) {
         printf("SOEM_Interface: Verification - TxPDO assignments: %d\n", read_val);
     }
     
-    wkc_result = ec_SDOread(slave, 0x1600, 0x00, FALSE, &read_val, EC_TIMEOUTRXM);
+    read_size = sizeof(read_val);
+    wkc_result = ec_SDOread(slave, 0x1600, 0x00, FALSE, &read_size, &read_val, EC_TIMEOUTRXM);
     if (wkc_result > 0) {
         printf("SOEM_Interface: Verification - RxPDO 0x1600 mappings: %d\n", read_val);
     }
     
-    wkc_result = ec_SDOread(slave, 0x1A00, 0x00, FALSE, &read_val, EC_TIMEOUTRXM);
+    read_size = sizeof(read_val);
+    wkc_result = ec_SDOread(slave, 0x1A00, 0x00, FALSE, &read_size, &read_val, EC_TIMEOUTRXM);
     if (wkc_result > 0) {
         printf("SOEM_Interface: Verification - TxPDO 0x1A00 mappings: %d\n", read_val);
     }
