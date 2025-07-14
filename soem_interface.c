@@ -116,7 +116,7 @@ OSAL_THREAD_FUNC ecat_loop(void *ptr)
         if (wkc >= expectedWKC) {
             // Communication successful
             consecutive_errors = 0;
-            printf("Communication is succesful")
+            printf("Communication is succesful");
             
             if (somanet_inputs) {
                 // Update current values with thread safety
