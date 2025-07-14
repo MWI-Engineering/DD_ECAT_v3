@@ -65,7 +65,7 @@ int soem_interface_write_sdo(uint16_t slave_idx, uint16_t index, uint8_t subinde
  * @param desired_state The target EtherCAT state (e.g., EC_STATE_PRE_OP, EC_STATE_OPERATIONAL).
  * @return 0 on success, -1 on failure.
  */
-int soem_interface_set_ethercat_state(uint16_t slave_idx, ec_state desired_state);
+int soem_interface_set_ethercat_state(uint16_t slave_idx, ec_state_t desired_state);
 
 /**
  * @brief Configures PDO mapping dynamically for a specific slave.
