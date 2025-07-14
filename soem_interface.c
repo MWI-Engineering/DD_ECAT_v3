@@ -95,9 +95,124 @@ int configure_somanet_pdo(uint16 slave)
     
     printf("SOEM_Interface: Configuring PDO for SOMANET slave %d...\n", slave);
     
+    // --- Start SDO Writes for Custom PDO Configuration (in Pre-Operational State) ---
+    // Slave 1 is the Synapticon ACTILINK-S
+    int slave_id = 1; // IMPORTANT: Adjust this if your Synapticon drive is a different slave ID
+
+    printf("SOEM_Interface: Configuring custom PDO mappings for Slave %d...\n", slave_id);
+    int sdo_wkc; // Working counter for SDO writes
+
+    // 1. Clear existing RxPDO assignments for Sync Manager 2 (0x1C12)
+    // Writing 0 to subindex 0 clears all entries in the assignment object.
+    sdo_wkc = ec_SDOwrite(slave_id, 0x1C12, 0x00, FALSE, 1, &ov0, EC_TIMEOUTRXM);
+    if (sdo_wkc == 0) {
+        printf("SOEM_Interface: ERROR - Failed to clear RxPDO assignments (0x1C12:00). sdo_wkc=%d\n", sdo_wkc);
+        // Consider adding more robust error handling here, e.g., return an error code or exit.
+    } else {
+        printf("SOEM_Interface: RxPDO assignments cleared.\n");
+    }
+
+    // 2. Clear existing TxPDO assignments for Sync Manager 3 (0x1C13)
+    sdo_wkc = ec_SDOwrite(slave_id, 0x1C13, 0x00, FALSE, 1, &ov0, EC_TIMEOUTRXM);
+    if (sdo_wkc == 0) {
+        printf("SOEM_Interface: ERROR - Failed to clear TxPDO assignments (0x1C13:00). sdo_wkc=%d\n", sdo_wkc);
+        // Handle error
+    } else {
+        printf("SOEM_Interface: TxPDO assignments cleared.\n");
+    }
+
+    // 3. Configure RxPDO Mapping (0x1600)
+    // Clear existing mapping for PDO 0x1600 before writing new entries.
+    sdo_wkc = ec_SDOwrite(slave_id, 0x1600, 0x00, FALSE, 1, &ov0, EC_TIMEOUTRXM);
+    if (sdo_wkc == 0) {
+        printf("SOEM_Interface: ERROR - Failed to clear RxPDO mapping (0x1600:00). sdo_wkc=%d\n", sdo_wkc);
+        // Handle error
+    }
+
+    // Write each entry to RxPDO 0x1600 subindices (1 to RX_PDO_MAP_COUNT)
+    for (int i = 0; i < RX_PDO_MAP_COUNT; i++) {
+        sdo_wkc = ec_SDOwrite(slave_id, 0x1600, i + 1, FALSE, 4, &rx_pdo_mapping[i], EC_TIMEOUTRXM);
+        if (sdo_wkc == 0) {
+            printf("SOEM_Interface: ERROR - Failed to write RxPDO map entry %d (0x1600:%02X). sdo_wkc=%d\n", i + 1, i + 1, sdo_wkc);
+            // Handle error
+        }
+    }
+    // Set the number of mapped objects for RxPDO 0x1600 (subindex 0)
+    uint8_t rx_map_count_u8 = RX_PDO_MAP_COUNT;
+    sdo_wkc = ec_SDOwrite(slave_id, 0x1600, 0x00, FALSE, 1, &rx_map_count_u8, EC_TIMEOUTRXM);
+    if (sdo_wkc == 0) {
+        printf("SOEM_Interface: ERROR - Failed to set RxPDO map count (0x1600:00). sdo_wkc=%d\n", sdo_wkc);
+        // Handle error
+    } else {
+        printf("SOEM_Interface: RxPDO mapping configured.\n");
+    }
+
+    // 4. Configure TxPDO Mapping (0x1A00)
+    // Clear existing mapping for PDO 0x1A00 before writing new entries.
+    sdo_wkc = ec_SDOwrite(slave_id, 0x1A00, 0x00, FALSE, 1, &ov0, EC_TIMEOUTRXM);
+    if (sdo_wkc == 0) {
+        printf("SOEM_Interface: ERROR - Failed to clear TxPDO mapping (0x1A00:00). sdo_wkc=%d\n", sdo_wkc);
+        // Handle error
+    }
+
+    // Write each entry to TxPDO 0x1A00 subindices (1 to TX_PDO_MAP_COUNT)
+    for (int i = 0; i < TX_PDO_MAP_COUNT; i++) {
+        sdo_wkc = ec_SDOwrite(slave_id, 0x1A00, i + 1, FALSE, 4, &tx_pdo_mapping[i], EC_TIMEOUTRXM);
+        if (sdo_wkc == 0) {
+            printf("SOEM_Interface: ERROR - Failed to write TxPDO map entry %d (0x1A00:%02X). sdo_wkc=%d\n", i + 1, i + 1, sdo_wkc);
+            // Handle error
+        }
+    }
+    // Set the number of mapped objects for TxPDO 0x1A00 (subindex 0)
+    uint8_t tx_map_count_u8 = TX_PDO_MAP_COUNT;
+    sdo_wkc = ec_SDOwrite(slave_id, 0x1A00, 0x00, FALSE, 1, &tx_map_count_u8, EC_TIMEOUTRXM);
+    if (sdo_wkc == 0) {
+        printf("SOEM_Interface: ERROR - Failed to set TxPDO map count (0x1A00:00). sdo_wkc=%d\n", sdo_wkc);
+        // Handle error
+    } else {
+        printf("SOEM_Interface: TxPDO mapping configured.\n");
+    }
+
+    // 5. Assign RxPDO 0x1600 to Sync Manager 2 (0x1C12)
+    uint16_t pdo1600 = 0x1600; // The PDO index to assign
+    sdo_wkc = ec_SDOwrite(slave_id, 0x1C12, 0x01, FALSE, 2, &pdo1600, EC_TIMEOUTRXM); // Assign 0x1600 to subindex 1
+    if (sdo_wkc == 0) {
+        printf("SOEM_Interface: ERROR - Failed to assign RxPDO 0x1600 to SM2 (0x1C12:01). sdo_wkc=%d\n", sdo_wkc);
+        // Handle error
+    }
+    uint8_t sm2_assigned_count = 1; // Only one PDO (0x1600) assigned to SM2
+    sdo_wkc = ec_SDOwrite(slave_id, 0x1C12, 0x00, FALSE, 1, &sm2_assigned_count, EC_TIMEOUTRXM); // Set count of assigned PDOs
+    if (sdo_wkc == 0) {
+        printf("SOEM_Interface: ERROR - Failed to set SM2 assigned count (0x1C12:00). sdo_wkc=%d\n", sdo_wkc);
+        // Handle error
+    } else {
+        printf("SOEM_Interface: RxPDO 0x1600 assigned to SM2.\n");
+    }
+
+    // 6. Assign TxPDO 0x1A00 to Sync Manager 3 (0x1C13)
+    uint16_t pdo1a00 = 0x1A00; // The PDO index to assign
+    sdo_wkc = ec_SDOwrite(slave_id, 0x1C13, 0x01, FALSE, 2, &pdo1a00, EC_TIMEOUTRXM); // Assign 0x1A00 to subindex 1
+    if (sdo_wkc == 0) {
+        printf("SOEM_Interface: ERROR - Failed to assign TxPDO 0x1A00 to SM3 (0x1C13:01). sdo_wkc=%d\n", sdo_wkc);
+        // Handle error
+    }
+    uint8_t sm3_assigned_count = 1; // Only one PDO (0x1A00) assigned to SM3
+    sdo_wkc = ec_SDOwrite(slave_id, 0x1C13, 0x00, FALSE, 1, &sm3_assigned_count, EC_TIMEOUTRXM); // Set count of assigned PDOs
+    if (sdo_wkc == 0) {
+        printf("SOEM_Interface: ERROR - Failed to set SM3 assigned count (0x1C13:00). sdo_wkc=%d\n", sdo_wkc);
+        // Handle error
+    } else {
+        printf("SOEM_Interface: TxPDO 0x1A00 assigned to SM3.\n");
+    }
+
+    printf("SOEM_Interface: Custom PDO configuration complete.\n");
+    // --- End SDO Writes ---
+
     // Set slave to PREOP state for configuration
     ec_statecheck(slave, EC_STATE_PRE_OP, EC_TIMEOUTSTATE);
     
+
+    /*
     // --- Configure RxPDO (Outputs from Master to Slave) ---
     
     // Clear existing RxPDO assignments
@@ -200,6 +315,7 @@ int configure_somanet_pdo(uint16 slave)
         printf("SOEM_Interface: Failed to set TxPDO mapping count\n");
         return -1;
     }
+    */
     
     // --- Assign PDO to sync managers ---
     
@@ -311,6 +427,50 @@ OSAL_THREAD_FUNC ecat_loop(void *ptr)
     printf("EtherCAT loop thread stopped.\n");
     return NULL;
 }
+
+// Define the RxPDO mapping for SM2 (Master -> Slave)
+// This corresponds to what the slave receives (somanet_txpdo_t in your script)
+// Format: (Object Index << 16) | (Subindex << 8) | BitLength
+uint32_t rx_pdo_mapping[] = {
+    0x60400010, // Controlword (0x6040:00, 16 bits)
+    0x60600008, // Modes of operation (0x6060:00, 8 bits)
+    0x60710010, // Target Torque (0x6071:00, 16 bits)
+    0x607A0020, // Target position (0x607A:00, 32 bits)
+    0x60FF0020, // Target velocity (0x60FF:00, 32 bits)
+    0x60B20010, // Torque offset (0x60B2:00, 16 bits)
+    0x27010020, // Tuning command (0x2701:00, 32 bits)
+    0x60FE0120, // Physical outputs (0x60FE:01, 32 bits)
+    0x60FE0220, // Bit mask (0x60FE:02, 32 bits)
+    0x27030020, // User MOSI (0x2703:00, 32 bits)
+    0x60B10020  // Velocity offset (0x60B1:00, 32 bits)
+};
+const uint8_t RX_PDO_MAP_COUNT = sizeof(rx_pdo_mapping) / sizeof(rx_pdo_mapping[0]);
+
+// Define the TxPDO mapping for SM3 (Slave -> Master)
+// This corresponds to what the master receives (somanet_rxpdo_t in your script)
+// Format: (Object Index << 16) | (Subindex << 8) | BitLength
+uint32_t tx_pdo_mapping[] = {
+    0x60410010, // Statusword (0x6041:00, 16 bits)
+    0x60610008, // Modes of operation display (0x6061:00, 8 bits)
+    0x60640020, // Position actual value (0x6064:00, 32 bits)
+    0x60690020, // Velocity actual value (0x6069:00, 32 bits)
+    0x60770010, // Torque actual value (0x6077:00, 16 bits)
+    0x26000120, // Analog input 1 (0x2600:01, 32 bits)
+    0x26000220, // Analog input 2 (0x2600:02, 32 bits)
+    0x26000320, // Analog input 3 (0x2600:03, 32 bits)
+    0x26000420, // Analog input 4 (0x2600:04, 32 bits)
+    0x27000020, // Tuning status (0x2700:00, 32 bits)
+    0x60FD0020, // Digital inputs (0x60FD:00, 32 bits)
+    0x27020020, // User MISO (0x2702:00, 32 bits)
+    0x28020020, // Timestamp (0x2802:00, 32 bits)
+    0x60FC0020, // Position demand internal value (0x60FC:00, 32 bits)
+    0x60F90020, // Velocity demand value (0x60F9:00, 32 bits)
+    0x60740010  // Torque demand (0x6074:00, 16 bits)
+};
+const uint8_t TX_PDO_MAP_COUNT = sizeof(tx_pdo_mapping) / sizeof(tx_pdo_mapping[0]);
+
+// Define a zero byte for SDO writes to subindex 0 for clearing purposes
+uint8_t ov0 = 0;
 
 /**
  * @brief Initializes the SOEM master and discovers slaves.
