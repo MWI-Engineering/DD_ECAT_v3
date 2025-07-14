@@ -116,6 +116,7 @@ OSAL_THREAD_FUNC ecat_loop(void *ptr)
         if (wkc >= expectedWKC) {
             // Communication successful
             consecutive_errors = 0;
+            printf("Communication is succesful")
             
             if (somanet_inputs) {
                 // Update current values with thread safety
@@ -170,7 +171,7 @@ int soem_interface_init_master(const char *ifname) {
         if (ec_config_init(FALSE) > 0) {
             printf("SOEM_Interface: %d slaves found and configured.\n", ec_slavecount);
             
-            //Compare Ibytes and Obytes
+        //Compare Ibytes and Obytes
             for (int i = 1; i <= ec_slavecount; i++) {
                 printf("Slave %d: name = %s\n", i, ec_slave[i].name);
                 printf("  Input size: %d bytes\n", ec_slave[i].Ibytes);
@@ -181,11 +182,11 @@ int soem_interface_init_master(const char *ifname) {
             printf("Expected input size: %zu, output size: %zu\n",
             sizeof(SomanetInputs_t), sizeof(SomanetOutputs_t));
 
+        // Map PDOs for all slaves
             if (ec_slavecount >= 1) {
-                // Map PDOs for all slaves
                 ec_config_map(&IOmap[0]);
                 
-         // Wait until all slaves reach SAFE_OP state
+        // Wait until all slaves reach SAFE_OP state
              printf("SOEM_Interface: Waiting for all slaves to reach SAFE_OP...\n");
 
             int wait_count = 0;
@@ -217,24 +218,24 @@ int soem_interface_init_master(const char *ifname) {
                     return -1;
                 }
 
-                // Calculate expected working counter
-                expectedWKC = (ec_group[0].outputsWKC * 2) + ec_group[0].inputsWKC;
+        // Calculate expected working counter
+            expectedWKC = (ec_group[0].outputsWKC * 2) + ec_group[0].inputsWKC;
                 printf("SOEM_Interface: Expected working counter: %d\n", expectedWKC);
 
-                // Get pointers to PDOs for slave 1 (Synapticon ACTILINK-S)
-                if (ec_slave[1].outputs && ec_slave[1].inputs) {
-                    somanet_outputs = (SomanetOutputs_t *)ec_slave[1].outputs;
-                    somanet_inputs = (SomanetInputs_t *)ec_slave[1].inputs;
+        // Get pointers to PDOs for slave 1 (Synapticon ACTILINK-S)
+            if (ec_slave[1].outputs && ec_slave[1].inputs) {
+                somanet_outputs = (SomanetOutputs_t *)ec_slave[1].outputs;
+                somanet_inputs = (SomanetInputs_t *)ec_slave[1].inputs;
                     
-                    printf("SOEM_Interface: PDO mapping complete. Slave 1 - Output size: %d bytes, Input size: %d bytes.\n",
+                printf("SOEM_Interface: PDO mapping complete. Slave 1 - Output size: %d bytes, Input size: %d bytes.\n",
                            ec_slave[1].Obytes, ec_slave[1].Ibytes);
                     
-                    // Verify PDO sizes match our structures
-                    if (ec_slave[1].Obytes != sizeof(SomanetOutputs_t) || 
-                        ec_slave[1].Ibytes != sizeof(SomanetInputs_t)) {
-                        printf("SOEM_Interface: Warning - PDO size mismatch! Expected Out:%zu In:%zu, Got Out:%d In:%d\n",
-                               sizeof(SomanetOutputs_t), sizeof(SomanetInputs_t),
-                               ec_slave[1].Obytes, ec_slave[1].Ibytes);
+        // Verify PDO sizes match our structures
+            if (ec_slave[1].Obytes != sizeof(SomanetOutputs_t) || 
+                    ec_slave[1].Ibytes != sizeof(SomanetInputs_t)) {
+                    printf("SOEM_Interface: Warning - PDO size mismatch! Expected Out:%zu In:%zu, Got Out:%d In:%d\n",
+                    sizeof(SomanetOutputs_t), sizeof(SomanetInputs_t),
+                    ec_slave[1].Obytes, ec_slave[1].Ibytes);
                     }
                 } else {
                     fprintf(stderr, "SOEM_Interface: Failed to get PDO pointers for Slave 1.\n");
@@ -242,13 +243,13 @@ int soem_interface_init_master(const char *ifname) {
                     return -1;
                 }
 
-                // Clear output PDOs initially
-                memset(somanet_outputs, 0, sizeof(SomanetOutputs_t));
+        // Clear output PDOs initially
+            memset(somanet_outputs, 0, sizeof(SomanetOutputs_t));
 
-                // Read initial drive status before sending controlword
-                ec_send_processdata();
-                wkc = ec_receive_processdata(EC_TIMEOUTRET);
-                if (wkc >= expectedWKC && somanet_inputs) {
+        // Read initial drive status before sending controlword
+            ec_send_processdata();
+            wkc = ec_receive_processdata(EC_TIMEOUTRET);
+            if (wkc >= expectedWKC && somanet_inputs) {
                 printf("SOEM_Interface: Initial drive state before controlword sequence:\n");
                 printf("  Statusword: 0x%04X\n", somanet_inputs->statusword);
                 printf("  Modes of Operation Display: 0x%02X\n", somanet_inputs->modes_of_operation_disp);
@@ -256,19 +257,19 @@ int soem_interface_init_master(const char *ifname) {
                 printf("  Velocity: %d\n", somanet_inputs->velocity_actual_value);
                 printf("  Torque: %d\n", somanet_inputs->torque_actual_value);
                 
-                } else {
+            } else {
                 fprintf(stderr, "SOEM_Interface: Failed to read initial drive state (WKC: %d, expected: %d).\n", wkc, expectedWKC);
                 }
 
-                // Initialize drive state machine
-                printf("SOEM_Interface: Initializing drive state machine...\n");               
+        // Initialize drive state machine
+            printf("SOEM_Interface: Initializing drive state machine...\n");               
                 
-                // Set Modes of Operation to Cyclic Synchronous Torque (CST)
+        // Set Modes of Operation to Cyclic Synchronous Torque (CST)
                 somanet_outputs->modes_of_operation = 0x0A; // CST mode
                 
-                // State machine sequence: Ready to switch on -> Switch on -> Operation enabled
-                const uint16_t state_sequence[] = {0x06, 0x07, 0x0F};
-                const char* state_names[] = {"Ready to switch on", "Switch on", "Operation enabled"};
+        // State machine sequence: Ready to switch on -> Switch on -> Operation enabled
+            const uint16_t state_sequence[] = {0x06, 0x07, 0x0F};
+            const char* state_names[] = {"Ready to switch on", "Switch on", "Operation enabled"};
                 
                 for (int i = 0; i < 3; i++) {
                     somanet_outputs->controlword = state_sequence[i];
@@ -284,11 +285,11 @@ int soem_interface_init_master(const char *ifname) {
                     usleep(100000); // Wait 100ms between state transitions
                 }
 
-                // Request OP state for all slaves
-                ec_statecheck(0, EC_STATE_OPERATIONAL, EC_TIMEOUTSTATE);
+        // Request OP state for all slaves
+            ec_statecheck(0, EC_STATE_OPERATIONAL, EC_TIMEOUTSTATE);
                 
-                // Check if all slaves reached operational state
-                int all_operational = 1;
+        // Check if all slaves reached operational state
+            int all_operational = 1;
                 for (int i = 1; i <= ec_slavecount; i++) {
                     if (ec_slave[i].state != EC_STATE_OPERATIONAL) {
                         printf("SOEM_Interface: Slave %d not operational. State: %d\n", i, ec_slave[i].state);
@@ -299,7 +300,7 @@ int soem_interface_init_master(const char *ifname) {
                 if (all_operational) {
                     printf("SOEM_Interface: All slaves operational. Starting EtherCAT thread...\n");
                     
-                    // Start EtherCAT communication thread
+            // Start EtherCAT communication thread
                     ecat_thread_running = 1;
                     if (pthread_create(&ecat_thread, NULL, ecat_loop, NULL) != 0) {
                         fprintf(stderr, "SOEM_Interface: Failed to create EtherCAT thread.\n");
@@ -341,7 +342,7 @@ void soem_interface_send_and_receive_pdo(float target_torque) {
         return;
     }
 
-    // Update target torque for the EtherCAT thread
+// Update target torque for the EtherCAT thread
     pthread_mutex_lock(&pdo_mutex);
     target_torque_f = target_torque;
     pthread_mutex_unlock(&pdo_mutex);

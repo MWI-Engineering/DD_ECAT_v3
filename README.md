@@ -119,8 +119,9 @@ This phase makes the Pi appear as a joystick to your PC.
 We need a script that defines the joystick's capabilities (1 axis for steering, FFB support). Copy the file named create_ffb_gadget.sh to the correct location.
 
 - cd DD_ECAT_v3
-- sudo cp ./create_ffb_gadgetsh /usr/bin/create_ffb_gadget.sh
+- sudo cp ./create_ffb_gadget.sh /usr/bin/create_ffb_gadget.sh
 - sudo chmod +x /usr/bin/create_ffb_gadget.sh
+- to test: sudo reboot
 
 ##### Automaticlly start the script
 
