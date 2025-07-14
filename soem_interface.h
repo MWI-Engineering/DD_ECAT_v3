@@ -3,6 +3,7 @@
 #define SOEM_INTERFACE_H
 
 #include <stdint.h>
+#include "ethercat.h" // Include for ec_state_t (now ec_state)
 
 #ifdef __cplusplus
 extern "C" {
@@ -46,6 +47,39 @@ int soem_interface_get_communication_status(void);
  * @brief Stops the SOEM master and cleans up resources.
  */
 void soem_interface_stop_master(void);
+
+/**
+ * @brief Helper function to perform an SDO write operation to a specific slave.
+ * @param slave_idx The index of the slave (1-based).
+ * @param index The 16-bit object dictionary index.
+ * @param subindex The 8-bit object dictionary subindex.
+ * @param data_size The size of the data to write in bytes.
+ * @param data Pointer to the data to write.
+ * @return 0 on success, -1 on failure.
+ */
+int soem_interface_write_sdo(uint16_t slave_idx, uint16_t index, uint8_t subindex, uint16_t data_size, void *data);
+
+/**
+ * @brief Attempts to set a specific EtherCAT slave to a desired state.
+ * @param slave_idx The index of the slave (0 for all slaves, 1-based for specific).
+ * @param desired_state The target EtherCAT state (e.g., EC_STATE_PRE_OP, EC_STATE_OPERATIONAL).
+ * @return 0 on success, -1 on failure.
+ */
+int soem_interface_set_ethercat_state(uint16_t slave_idx, ec_state desired_state);
+
+/**
+ * @brief Configures PDO mapping dynamically for a specific slave.
+ * This function implements the steps for dynamic PDO remapping as per Synapticon documentation.
+ * @param slave_idx The index of the slave (1-based).
+ * @param pdo_assign_idx The index of the PDO Assign object (e.g., 0x1C12 for RxPDO, 0x1C13 for TxPDO).
+ * @param pdo_map_idx The index of the PDO Mapping object (e.g., 0x1600 for RxPDO, 0x1A00 for TxPDO).
+ * @param mapped_objects An array of 32-bit values, where each value represents an object to map:
+ * (Index << 16 | Subindex << 8 | LengthInBits).
+ * @param num_mapped_objects The number of objects in the mapped_objects array.
+ * @return 0 on success, -1 on failure.
+ */
+int soem_interface_configure_pdo_mapping(uint16_t slave_idx, uint16_t pdo_assign_idx, uint16_t pdo_map_idx, uint32_t *mapped_objects, uint8_t num_mapped_objects);
+
 
 // --- Constants ---
 
