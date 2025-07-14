@@ -85,7 +85,7 @@ void ecat_print_func(const char *fmt, ...)
     va_end(args);
 }
 
-// PDO configuration function for SOMANET
+// PDO configuration function for SOMANET - Robust version with complete configuration
 int configure_somanet_pdo(uint16 slave)
 {
     int retval = 0;
@@ -97,26 +97,43 @@ int configure_somanet_pdo(uint16 slave)
     
     // Set slave to PREOP state for configuration
     ec_statecheck(slave, EC_STATE_PRE_OP, EC_TIMEOUTSTATE);
+    printf("SOEM_Interface: Slave %d in PREOP state for PDO configuration\n", slave);
     
-    // --- Configure RxPDO (Outputs from Master to Slave) ---
+    // === STEP 1: Clear existing PDO assignments for Sync Managers 2 and 3 ===
+    printf("SOEM_Interface: Step 1 - Clearing existing PDO assignments...\n");
     
-    // Clear existing RxPDO assignments
+    // Clear RxPDO assignments (Sync Manager 2 - 0x1C12:00)
     u16val = 0;
     wkc_result = ec_SDOwrite(slave, 0x1C12, 0x00, FALSE, sizeof(u16val), &u16val, EC_TIMEOUTRXM);
     if (wkc_result <= 0) {
-        printf("SOEM_Interface: Failed to clear RxPDO assignments\n");
+        printf("SOEM_Interface: Failed to clear RxPDO assignments (0x1C12:00), WKC: %d\n", wkc_result);
         return -1;
     }
+    printf("SOEM_Interface: Cleared RxPDO assignments (0x1C12:00)\n");
     
-    // Configure RxPDO 0x1600 mapping
-    u16val = 0; // Clear subindex 0 (number of mapped objects)
+    // Clear TxPDO assignments (Sync Manager 3 - 0x1C13:00)
+    u16val = 0;
+    wkc_result = ec_SDOwrite(slave, 0x1C13, 0x00, FALSE, sizeof(u16val), &u16val, EC_TIMEOUTRXM);
+    if (wkc_result <= 0) {
+        printf("SOEM_Interface: Failed to clear TxPDO assignments (0x1C13:00), WKC: %d\n", wkc_result);
+        return -1;
+    }
+    printf("SOEM_Interface: Cleared TxPDO assignments (0x1C13:00)\n");
+    
+    // === STEP 2: Define custom RxPDO mappings (0x1600) ===
+    printf("SOEM_Interface: Step 2 - Defining custom RxPDO mappings...\n");
+    
+    // Clear RxPDO 0x1600 mapping count first (0x1600:00)
+    u16val = 0;
     wkc_result = ec_SDOwrite(slave, 0x1600, 0x00, FALSE, sizeof(u16val), &u16val, EC_TIMEOUTRXM);
     if (wkc_result <= 0) {
-        printf("SOEM_Interface: Failed to clear RxPDO 0x1600 mapping\n");
+        printf("SOEM_Interface: Failed to clear RxPDO 0x1600 mapping count, WKC: %d\n", wkc_result);
         return -1;
     }
+    printf("SOEM_Interface: Cleared RxPDO 0x1600 mapping count (0x1600:00)\n");
     
-    // Map RxPDO objects
+    // Define RxPDO mapping objects (Master -> Slave)
+    // Format: 0xAAAABBCC where AAAA=Index, BB=Subindex, CC=Bit length
     uint32 rxpdo_mapping[] = {
         0x60400010, // 0x6040:0x00 - Controlword (16 bits)
         0x60600008, // 0x6060:0x00 - Modes of operation (8 bits)
@@ -131,41 +148,41 @@ int configure_somanet_pdo(uint16 slave)
         0x60B10020  // 0x60B1:0x00 - Velocity offset (32 bits)
     };
     
-    for (int i = 0; i < sizeof(rxpdo_mapping)/sizeof(uint32); i++) {
+    const int rxpdo_count = sizeof(rxpdo_mapping) / sizeof(uint32);
+    
+    // Write each RxPDO mapping entry to 0x1600:01, 0x1600:02, etc.
+    for (int i = 0; i < rxpdo_count; i++) {
         wkc_result = ec_SDOwrite(slave, 0x1600, i+1, FALSE, sizeof(uint32), &rxpdo_mapping[i], EC_TIMEOUTRXM);
         if (wkc_result <= 0) {
-            printf("SOEM_Interface: Failed to map RxPDO object %d (0x%08X)\n", i+1, rxpdo_mapping[i]);
+            printf("SOEM_Interface: Failed to write RxPDO mapping %d (0x1600:%02d = 0x%08X), WKC: %d\n", 
+                   i+1, i+1, rxpdo_mapping[i], wkc_result);
             return -1;
         }
+        printf("SOEM_Interface: Mapped RxPDO object %d: 0x1600:%02d = 0x%08X\n", i+1, i+1, rxpdo_mapping[i]);
     }
     
-    // Set number of mapped objects
-    u16val = sizeof(rxpdo_mapping)/sizeof(uint32);
+    // Set total number of mapped RxPDO objects (0x1600:00)
+    u16val = rxpdo_count;
     wkc_result = ec_SDOwrite(slave, 0x1600, 0x00, FALSE, sizeof(u16val), &u16val, EC_TIMEOUTRXM);
     if (wkc_result <= 0) {
-        printf("SOEM_Interface: Failed to set RxPDO mapping count\n");
+        printf("SOEM_Interface: Failed to set RxPDO mapping count (%d), WKC: %d\n", rxpdo_count, wkc_result);
         return -1;
     }
+    printf("SOEM_Interface: Set RxPDO mapping count to %d (0x1600:00)\n", rxpdo_count);
     
-    // --- Configure TxPDO (Inputs from Slave to Master) ---
+    // === STEP 3: Define custom TxPDO mappings (0x1A00) ===
+    printf("SOEM_Interface: Step 3 - Defining custom TxPDO mappings...\n");
     
-    // Clear existing TxPDO assignments
+    // Clear TxPDO 0x1A00 mapping count first (0x1A00:00)
     u16val = 0;
-    wkc_result = ec_SDOwrite(slave, 0x1C13, 0x00, FALSE, sizeof(u16val), &u16val, EC_TIMEOUTRXM);
-    if (wkc_result <= 0) {
-        printf("SOEM_Interface: Failed to clear TxPDO assignments\n");
-        return -1;
-    }
-    
-    // Configure TxPDO 0x1A00 mapping
-    u16val = 0; // Clear subindex 0
     wkc_result = ec_SDOwrite(slave, 0x1A00, 0x00, FALSE, sizeof(u16val), &u16val, EC_TIMEOUTRXM);
     if (wkc_result <= 0) {
-        printf("SOEM_Interface: Failed to clear TxPDO 0x1A00 mapping\n");
+        printf("SOEM_Interface: Failed to clear TxPDO 0x1A00 mapping count, WKC: %d\n", wkc_result);
         return -1;
     }
+    printf("SOEM_Interface: Cleared TxPDO 0x1A00 mapping count (0x1A00:00)\n");
     
-    // Map TxPDO objects
+    // Define TxPDO mapping objects (Slave -> Master)
     uint32 txpdo_mapping[] = {
         0x60410010, // 0x6041:0x00 - Statusword (16 bits)
         0x60610008, // 0x6061:0x00 - Modes of operation display (8 bits)
@@ -185,57 +202,99 @@ int configure_somanet_pdo(uint16 slave)
         0x60740010  // 0x6074:0x00 - Torque demand (16 bits)
     };
     
-    for (int i = 0; i < sizeof(txpdo_mapping)/sizeof(uint32); i++) {
+    const int txpdo_count = sizeof(txpdo_mapping) / sizeof(uint32);
+    
+    // Write each TxPDO mapping entry to 0x1A00:01, 0x1A00:02, etc.
+    for (int i = 0; i < txpdo_count; i++) {
         wkc_result = ec_SDOwrite(slave, 0x1A00, i+1, FALSE, sizeof(uint32), &txpdo_mapping[i], EC_TIMEOUTRXM);
         if (wkc_result <= 0) {
-            printf("SOEM_Interface: Failed to map TxPDO object %d (0x%08X)\n", i+1, txpdo_mapping[i]);
+            printf("SOEM_Interface: Failed to write TxPDO mapping %d (0x1A00:%02d = 0x%08X), WKC: %d\n", 
+                   i+1, i+1, txpdo_mapping[i], wkc_result);
             return -1;
         }
+        printf("SOEM_Interface: Mapped TxPDO object %d: 0x1A00:%02d = 0x%08X\n", i+1, i+1, txpdo_mapping[i]);
     }
     
-    // Set number of mapped objects
-    u16val = sizeof(txpdo_mapping)/sizeof(uint32);
+    // Set total number of mapped TxPDO objects (0x1A00:00)
+    u16val = txpdo_count;
     wkc_result = ec_SDOwrite(slave, 0x1A00, 0x00, FALSE, sizeof(u16val), &u16val, EC_TIMEOUTRXM);
     if (wkc_result <= 0) {
-        printf("SOEM_Interface: Failed to set TxPDO mapping count\n");
+        printf("SOEM_Interface: Failed to set TxPDO mapping count (%d), WKC: %d\n", txpdo_count, wkc_result);
         return -1;
     }
+    printf("SOEM_Interface: Set TxPDO mapping count to %d (0x1A00:00)\n", txpdo_count);
     
-    // --- Assign PDO to sync managers ---
+    // === STEP 4: Assign PDOs to Sync Managers ===
+    printf("SOEM_Interface: Step 4 - Assigning PDOs to Sync Managers...\n");
     
-    // Assign RxPDO 0x1600 to sync manager 2
+    // Assign RxPDO 0x1600 to Sync Manager 2 (0x1C12:01)
     u16val = 0x1600;
     wkc_result = ec_SDOwrite(slave, 0x1C12, 0x01, FALSE, sizeof(u16val), &u16val, EC_TIMEOUTRXM);
     if (wkc_result <= 0) {
-        printf("SOEM_Interface: Failed to assign RxPDO to SM2\n");
+        printf("SOEM_Interface: Failed to assign RxPDO 0x1600 to SM2 (0x1C12:01), WKC: %d\n", wkc_result);
         return -1;
     }
+    printf("SOEM_Interface: Assigned RxPDO 0x1600 to SM2 (0x1C12:01)\n");
     
-    // Enable RxPDO assignment
+    // Set number of assigned RxPDOs (0x1C12:00)
     u16val = 1;
     wkc_result = ec_SDOwrite(slave, 0x1C12, 0x00, FALSE, sizeof(u16val), &u16val, EC_TIMEOUTRXM);
     if (wkc_result <= 0) {
-        printf("SOEM_Interface: Failed to enable RxPDO assignment\n");
+        printf("SOEM_Interface: Failed to set RxPDO assignment count (0x1C12:00), WKC: %d\n", wkc_result);
         return -1;
     }
+    printf("SOEM_Interface: Set RxPDO assignment count to 1 (0x1C12:00)\n");
     
-    // Assign TxPDO 0x1A00 to sync manager 3
+    // Assign TxPDO 0x1A00 to Sync Manager 3 (0x1C13:01)
     u16val = 0x1A00;
     wkc_result = ec_SDOwrite(slave, 0x1C13, 0x01, FALSE, sizeof(u16val), &u16val, EC_TIMEOUTRXM);
     if (wkc_result <= 0) {
-        printf("SOEM_Interface: Failed to assign TxPDO to SM3\n");
+        printf("SOEM_Interface: Failed to assign TxPDO 0x1A00 to SM3 (0x1C13:01), WKC: %d\n", wkc_result);
         return -1;
     }
+    printf("SOEM_Interface: Assigned TxPDO 0x1A00 to SM3 (0x1C13:01)\n");
     
-    // Enable TxPDO assignment
+    // Set number of assigned TxPDOs (0x1C13:00)
     u16val = 1;
     wkc_result = ec_SDOwrite(slave, 0x1C13, 0x00, FALSE, sizeof(u16val), &u16val, EC_TIMEOUTRXM);
     if (wkc_result <= 0) {
-        printf("SOEM_Interface: Failed to enable TxPDO assignment\n");
+        printf("SOEM_Interface: Failed to set TxPDO assignment count (0x1C13:00), WKC: %d\n", wkc_result);
         return -1;
     }
+    printf("SOEM_Interface: Set TxPDO assignment count to 1 (0x1C13:00)\n");
     
-    printf("SOEM_Interface: PDO configuration completed successfully\n");
+    // === STEP 5: Verify configuration ===
+    printf("SOEM_Interface: Step 5 - Verifying PDO configuration...\n");
+    
+    // Small delay to allow device to process configuration
+    usleep(50000); // 50ms delay
+    
+    // Read back some configuration to verify
+    uint16 read_val;
+    wkc_result = ec_SDOread(slave, 0x1C12, 0x00, FALSE, &read_val, EC_TIMEOUTRXM);
+    if (wkc_result > 0) {
+        printf("SOEM_Interface: Verification - RxPDO assignments: %d\n", read_val);
+    }
+    
+    wkc_result = ec_SDOread(slave, 0x1C13, 0x00, FALSE, &read_val, EC_TIMEOUTRXM);
+    if (wkc_result > 0) {
+        printf("SOEM_Interface: Verification - TxPDO assignments: %d\n", read_val);
+    }
+    
+    wkc_result = ec_SDOread(slave, 0x1600, 0x00, FALSE, &read_val, EC_TIMEOUTRXM);
+    if (wkc_result > 0) {
+        printf("SOEM_Interface: Verification - RxPDO 0x1600 mappings: %d\n", read_val);
+    }
+    
+    wkc_result = ec_SDOread(slave, 0x1A00, 0x00, FALSE, &read_val, EC_TIMEOUTRXM);
+    if (wkc_result > 0) {
+        printf("SOEM_Interface: Verification - TxPDO 0x1A00 mappings: %d\n", read_val);
+    }
+    
+    printf("SOEM_Interface: PDO configuration completed successfully for slave %d\n", slave);
+    printf("SOEM_Interface: - RxPDO: %d objects mapped to 0x1600, assigned to SM2\n", rxpdo_count);
+    printf("SOEM_Interface: - TxPDO: %d objects mapped to 0x1A00, assigned to SM3\n", txpdo_count);
+    
     return 0;
 }
 
