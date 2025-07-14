@@ -4,7 +4,8 @@
 CC = gcc
 
 # Compiler flags
-CFLAGS = -Wall -Wextra -pthread -I.
+#   -I/home/mwi/SOEM/install/include/soem: Add this line for SOEM headers
+CFLAGS = -Wall -Wextra -pthread -I/home/mwi/SOEM/install/include/soem
 
 # Linker flags
 LDFLAGS = -lpthread -ljson-c -lm
