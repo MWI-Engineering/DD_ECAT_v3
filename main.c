@@ -88,7 +88,8 @@ int main(int argc, char *argv[]) {
     }
 
     printf("Initializing EtherCAT master on interface %s...\n", ethercat_ifname);
-    if (soem_interface_init_master(ethercat_ifname) != 0) {
+    // Corrected function call from soem_interface_init_master to soem_interface_init
+    if (soem_interface_init(ethercat_ifname) != 0) {
         fprintf(stderr, "Failed to initialize EtherCAT master. Exiting.\n");
         hid_interface_stop();
         return EXIT_FAILURE;
@@ -197,7 +198,7 @@ int main(int argc, char *argv[]) {
         } else if (sleep_ns < -1000000) { // More than 1ms late
             static int late_warning_count = 0;
             if (late_warning_count++ < 10) { // Limit warnings to avoid spam
-                printf("Warning: Loop running %.3fms late (target: %.3fms, actual: %.3fms)\n",
+                printf("Warning: Loop running %.3fms late (target: %.3fms, actual: %.3fms)\\n",
                        -sleep_ns / 1000000.0, cycle_time_ns / 1000000.0, elapsed_ns / 1000000.0);
             }
         }
