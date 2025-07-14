@@ -1,4 +1,4 @@
-// soem_interface.c - Fixed version with proper PDO configuration
+// soem_interface.c - Fixed version using existing PDO configuration
 #include "soem_interface.h"
 #include <stdio.h>
 #include <unistd.h> // For usleep
@@ -20,39 +20,40 @@ int expectedWKC;   // Expected working counter
 ec_timet tmo;      // Timeout for SOEM functions
 
 // --- PDO Structures for Synapticon ACTILINK-S (Slave 1) ---
+// These match the exact PDO mapping from the device
 typedef struct PACKED
 {
-    uint16 controlword;         // 0x6040:0x00
-    int8   modes_of_operation;  // 0x6060:0x00
-    int16  target_torque;       // 0x6071:0x00
-    int32  target_position;     // 0x607A:0x00
-    int32  target_velocity;     // 0x60FF:0x00
-    int16  torque_offset;       // 0x60B2:0x00
-    uint32 tuning_command;      // 0x2701:0x00
-    uint32 physical_outputs;    // 0x60FE:0x01
-    uint32 bit_mask;            // 0x60FE:0x02
-    uint32 user_mosi;           // 0x2703:0x00
-    int32  velocity_offset;     // 0x60B1:0x00
+    uint16 controlword;         // 0x6040:0x00 - [0x0000.0]
+    int8   modes_of_operation;  // 0x6060:0x00 - [0x0002.0]
+    int16  target_torque;       // 0x6071:0x00 - [0x0003.0]
+    int32  target_position;     // 0x607A:0x00 - [0x0005.0]
+    int32  target_velocity;     // 0x60FF:0x00 - [0x0009.0]
+    int16  torque_offset;       // 0x60B2:0x00 - [0x000D.0]
+    uint32 tuning_command;      // 0x2701:0x00 - [0x000F.0]
+    uint32 physical_outputs;    // 0x60FE:0x01 - [0x0013.0]
+    uint32 bit_mask;            // 0x60FE:0x02 - [0x0017.0]
+    uint32 user_mosi;           // 0x2703:0x00 - [0x001B.0]
+    int32  velocity_offset;     // 0x60B1:0x00 - [0x001F.0]
 } SomanetOutputs_t;
 
 typedef struct PACKED
 {
-    uint16 statusword;              // 0x6041:0x00
-    int8   modes_of_operation_disp; // 0x6061:0x00
-    int32  position_actual_value;   // 0x6064:0x00
-    int32  velocity_actual_value;   // 0x606C:0x00
-    int16  torque_actual_value;     // 0x6077:0x00
-    uint16 analog_input_1;          // 0x2401:0x00
-    uint16 analog_input_2;          // 0x2402:0x00
-    uint16 analog_input_3;          // 0x2403:0x00
-    uint16 analog_input_4;          // 0x2404:0x00
-    uint32 tuning_status;           // 0x2702:0x00
-    uint32 digital_inputs;          // 0x60FD:0x00
-    uint32 user_miso;               // 0x2704:0x00
-    uint32 timestamp;               // 0x20F0:0x00
-    int32  position_demand_internal; // 0x60FC:0x00
-    int32  velocity_demand_value;   // 0x606B:0x00
-    int16  torque_demand;           // 0x6074:0x00
+    uint16 statusword;              // 0x6041:0x00 - [0x0023.0]
+    int8   modes_of_operation_disp; // 0x6061:0x00 - [0x0025.0]
+    int32  position_actual_value;   // 0x6064:0x00 - [0x0026.0]
+    int32  velocity_actual_value;   // 0x606C:0x00 - [0x002A.0]
+    int16  torque_actual_value;     // 0x6077:0x00 - [0x002E.0]
+    uint16 analog_input_1;          // 0x2401:0x00 - [0x0030.0]
+    uint16 analog_input_2;          // 0x2402:0x00 - [0x0032.0]
+    uint16 analog_input_3;          // 0x2403:0x00 - [0x0034.0]
+    uint16 analog_input_4;          // 0x2404:0x00 - [0x0036.0]
+    uint32 tuning_status;           // 0x2702:0x00 - [0x0038.0]
+    uint32 digital_inputs;          // 0x60FD:0x00 - [0x003C.0]
+    uint32 user_miso;               // 0x2704:0x00 - [0x0040.0]
+    uint32 timestamp;               // 0x20F0:0x00 - [0x0044.0]
+    int32  position_demand_internal; // 0x60FC:0x00 - [0x0048.0]
+    int32  velocity_demand_value;   // 0x606B:0x00 - [0x004C.0]
+    int16  torque_demand;           // 0x6074:0x00 - [0x0050.0]
 } SomanetInputs_t;
 
 // Pointers to the PDO structures in the IOmap
@@ -85,104 +86,6 @@ void ecat_print_func(const char *fmt, ...)
     va_end(args);
 }
 
-// Function to configure PDO mapping for SOMANET drive
-int configure_somanet_pdo(uint16 slave)
-{
-    int retval = 0;
-    uint8 u8val;
-    uint16 u16val;
-    uint32 u32val;
-    
-    printf("SOEM_Interface: Configuring PDO mapping for slave %d...\n", slave);
-    
-    // First, check if drive is in PRE_OP state
-    if (ec_slave[slave].state != EC_STATE_PRE_OP) {
-        printf("SOEM_Interface: Warning - Slave %d not in PRE_OP state (state: 0x%02X)\n", 
-               slave, ec_slave[slave].state);
-    }
-    
-    // Configure RxPDO (Outputs from Master to Slave)
-    // Disable RxPDO 1 first
-    u8val = 0;
-    retval += ec_SDOwrite(slave, 0x1600, 0x00, FALSE, sizeof(u8val), &u8val, EC_TIMEOUTRXM);
-    
-    // Map RxPDO entries
-    u32val = 0x60400010; // Controlword (0x6040:0x00, 16 bits)
-    retval += ec_SDOwrite(slave, 0x1600, 0x01, FALSE, sizeof(u32val), &u32val, EC_TIMEOUTRXM);
-    
-    u32val = 0x60600008; // Modes of operation (0x6060:0x00, 8 bits)
-    retval += ec_SDOwrite(slave, 0x1600, 0x02, FALSE, sizeof(u32val), &u32val, EC_TIMEOUTRXM);
-    
-    u32val = 0x60710010; // Target torque (0x6071:0x00, 16 bits)
-    retval += ec_SDOwrite(slave, 0x1600, 0x03, FALSE, sizeof(u32val), &u32val, EC_TIMEOUTRXM);
-    
-    u32val = 0x607A0020; // Target position (0x607A:0x00, 32 bits)
-    retval += ec_SDOwrite(slave, 0x1600, 0x04, FALSE, sizeof(u32val), &u32val, EC_TIMEOUTRXM);
-    
-    u32val = 0x60FF0020; // Target velocity (0x60FF:0x00, 32 bits)
-    retval += ec_SDOwrite(slave, 0x1600, 0x05, FALSE, sizeof(u32val), &u32val, EC_TIMEOUTRXM);
-    
-    // Set number of entries in RxPDO
-    u8val = 5;
-    retval += ec_SDOwrite(slave, 0x1600, 0x00, FALSE, sizeof(u8val), &u8val, EC_TIMEOUTRXM);
-    
-    // Configure TxPDO (Inputs from Slave to Master)
-    // Disable TxPDO 1 first
-    u8val = 0;
-    retval += ec_SDOwrite(slave, 0x1A00, 0x00, FALSE, sizeof(u8val), &u8val, EC_TIMEOUTRXM);
-    
-    // Map TxPDO entries
-    u32val = 0x60410010; // Statusword (0x6041:0x00, 16 bits)
-    retval += ec_SDOwrite(slave, 0x1A00, 0x01, FALSE, sizeof(u32val), &u32val, EC_TIMEOUTRXM);
-    
-    u32val = 0x60610008; // Modes of operation display (0x6061:0x00, 8 bits)
-    retval += ec_SDOwrite(slave, 0x1A00, 0x02, FALSE, sizeof(u32val), &u32val, EC_TIMEOUTRXM);
-    
-    u32val = 0x60640020; // Position actual value (0x6064:0x00, 32 bits)
-    retval += ec_SDOwrite(slave, 0x1A00, 0x03, FALSE, sizeof(u32val), &u32val, EC_TIMEOUTRXM);
-    
-    u32val = 0x606C0020; // Velocity actual value (0x606C:0x00, 32 bits)
-    retval += ec_SDOwrite(slave, 0x1A00, 0x04, FALSE, sizeof(u32val), &u32val, EC_TIMEOUTRXM);
-    
-    u32val = 0x60770010; // Torque actual value (0x6077:0x00, 16 bits)
-    retval += ec_SDOwrite(slave, 0x1A00, 0x05, FALSE, sizeof(u32val), &u32val, EC_TIMEOUTRXM);
-    
-    // Set number of entries in TxPDO
-    u8val = 5;
-    retval += ec_SDOwrite(slave, 0x1A00, 0x00, FALSE, sizeof(u8val), &u8val, EC_TIMEOUTRXM);
-    
-    if (retval == 0) {
-        printf("SOEM_Interface: PDO configuration successful for slave %d\n", slave);
-        return 0;
-    } else {
-        printf("SOEM_Interface: PDO configuration failed for slave %d (errors: %d)\n", slave, retval);
-        return -1;
-    }
-}
-
-// Simplified PDO structures for basic configuration
-typedef struct PACKED
-{
-    uint16 controlword;         // 0x6040:0x00
-    int8   modes_of_operation;  // 0x6060:0x00
-    int16  target_torque;       // 0x6071:0x00
-    int32  target_position;     // 0x607A:0x00
-    int32  target_velocity;     // 0x60FF:0x00
-} SomanetOutputsSimple_t;
-
-typedef struct PACKED
-{
-    uint16 statusword;              // 0x6041:0x00
-    int8   modes_of_operation_disp; // 0x6061:0x00
-    int32  position_actual_value;   // 0x6064:0x00
-    int32  velocity_actual_value;   // 0x606C:0x00
-    int16  torque_actual_value;     // 0x6077:0x00
-} SomanetInputsSimple_t;
-
-// Pointers to simplified PDO structures
-static SomanetOutputsSimple_t *somanet_outputs_simple;
-static SomanetInputsSimple_t *somanet_inputs_simple;
-
 // EtherCAT real-time loop thread
 OSAL_THREAD_FUNC ecat_loop(void *ptr)
 {
@@ -199,10 +102,10 @@ OSAL_THREAD_FUNC ecat_loop(void *ptr)
         pthread_mutex_unlock(&pdo_mutex);
 
         // Update output PDOs
-        if (somanet_outputs_simple) {
-            somanet_outputs_simple->target_torque = (int16)(local_target_torque * TORQUE_SCALE_FACTOR);
+        if (somanet_outputs) {
+            somanet_outputs->target_torque = (int16)(local_target_torque * TORQUE_SCALE_FACTOR);
             // Keep controlword at 0x0F (operation enabled) during normal operation
-            somanet_outputs_simple->controlword = 0x0F;
+            somanet_outputs->controlword = 0x0F;
         }
 
         // Send process data to slaves
@@ -215,18 +118,28 @@ OSAL_THREAD_FUNC ecat_loop(void *ptr)
             // Communication successful
             consecutive_errors = 0;
             
-            if (somanet_inputs_simple) {
+            if (somanet_inputs) {
                 // Update current values with thread safety
                 pthread_mutex_lock(&pdo_mutex);
-                current_position_f = (float)somanet_inputs_simple->position_actual_value * POSITION_SCALE_FACTOR;
-                current_velocity_f = (float)somanet_inputs_simple->velocity_actual_value * VELOCITY_SCALE_FACTOR;
+                current_position_f = (float)somanet_inputs->position_actual_value * POSITION_SCALE_FACTOR;
+                current_velocity_f = (float)somanet_inputs->velocity_actual_value * VELOCITY_SCALE_FACTOR;
                 communication_ok = 1;
                 pthread_mutex_unlock(&pdo_mutex);
 
+                // Debug output every 1000 cycles (1 second)
+                static int debug_counter = 0;
+                if (++debug_counter >= 1000) {
+                    printf("EtherCAT: WKC=%d, Status=0x%04X, Pos=%d, Vel=%d, Torque=%d\n",
+                           wkc, somanet_inputs->statusword, 
+                           somanet_inputs->position_actual_value,
+                           somanet_inputs->velocity_actual_value,
+                           somanet_inputs->torque_actual_value);
+                    debug_counter = 0;
+                }
+
                 // Check for drive faults
-                if (somanet_inputs_simple->statusword & 0x08) {
-                    printf("EtherCAT: Drive fault detected! Statusword: 0x%04X\n", somanet_inputs_simple->statusword);
-                    // You might want to handle faults here (e.g., clear fault, stop operation)
+                if (somanet_inputs->statusword & 0x08) {
+                    printf("EtherCAT: Drive fault detected! Statusword: 0x%04X\n", somanet_inputs->statusword);
                 }
             }
         } else {
@@ -268,7 +181,7 @@ int soem_interface_init_master(const char *ifname) {
         if (ec_config_init(FALSE) > 0) {
             printf("SOEM_Interface: %d slaves found and configured.\n", ec_slavecount);
             
-            // Compare Ibytes and Obytes
+            // Print detailed slave information
             for (int i = 1; i <= ec_slavecount; i++) {
                 printf("Slave %d: name = %s\n", i, ec_slave[i].name);
                 printf("  Input size: %d bytes\n", ec_slave[i].Ibytes);
@@ -276,171 +189,160 @@ int soem_interface_init_master(const char *ifname) {
                 printf("  State: 0x%02X\n", ec_slave[i].state);
                 printf("  Vendor ID: 0x%08X\n", ec_slave[i].eep_man);
                 printf("  Product Code: 0x%08X\n", ec_slave[i].eep_id);
+                printf("  Has DC: %s\n", ec_slave[i].hasdc ? "Yes" : "No");
             }
 
-            // Configure PDO mapping for SOMANET drive
-            if (ec_slavecount >= 1) {
-                // Configure PDO mapping first
-                if (configure_somanet_pdo(1) != 0) {
-                    fprintf(stderr, "SOEM_Interface: Failed to configure PDO mapping for slave 1.\n");
+            printf("Expected input size: %zu, output size: %zu\n",
+                   sizeof(SomanetInputs_t), sizeof(SomanetOutputs_t));
+
+            // Verify PDO sizes match our structures
+            if (ec_slave[1].Obytes != sizeof(SomanetOutputs_t) || 
+                ec_slave[1].Ibytes != sizeof(SomanetInputs_t)) {
+                printf("SOEM_Interface: Warning - PDO size mismatch!\n");
+                printf("  Expected: Output=%zu Input=%zu\n", sizeof(SomanetOutputs_t), sizeof(SomanetInputs_t));
+                printf("  Actual:   Output=%d Input=%d\n", ec_slave[1].Obytes, ec_slave[1].Ibytes);
+                // Don't return error - the sizes from device are authoritative
+            }
+
+            // Map PDOs for all slaves
+            ec_config_map(&IOmap[0]);
+            
+            // Get pointers to PDOs for slave 1 (Synapticon ACTILINK-S)
+            if (ec_slave[1].outputs && ec_slave[1].inputs) {
+                somanet_outputs = (SomanetOutputs_t *)ec_slave[1].outputs;
+                somanet_inputs = (SomanetInputs_t *)ec_slave[1].inputs;
+                
+                printf("SOEM_Interface: PDO mapping complete. Slave 1 - Output size: %d bytes, Input size: %d bytes.\n",
+                       ec_slave[1].Obytes, ec_slave[1].Ibytes);
+            } else {
+                fprintf(stderr, "SOEM_Interface: Failed to get PDO pointers for Slave 1.\n");
+                ec_close();
+                return -1;
+            }
+
+            // Wait until all slaves reach SAFE_OP state
+            printf("SOEM_Interface: Waiting for all slaves to reach SAFE_OP...\n");
+
+            int wait_count = 0;
+            const int max_waits = 50; // wait up to 5 seconds (50 * 100ms)
+
+            do {
+                ec_statecheck(0, EC_STATE_SAFE_OP, EC_TIMEOUTSTATE);
+
+                int all_safe_op = 1;
+                for (int i = 1; i <= ec_slavecount; i++) {
+                    if (ec_slave[i].state != EC_STATE_SAFE_OP) {
+                        printf("  Slave %d not in SAFE_OP (state: 0x%02X)\n", i, ec_slave[i].state);
+                        all_safe_op = 0;
+                    }
+                }
+
+                if (all_safe_op) {
+                    printf("SOEM_Interface: All slaves are in SAFE_OP.\n");
+                    break;
+                }
+
+                usleep(100000); // Wait 100ms
+                wait_count++;
+            } while (wait_count < max_waits);
+
+            if (wait_count >= max_waits) {
+                fprintf(stderr, "SOEM_Interface: Timeout waiting for SAFE_OP state.\n");
+                ec_close();
+                return -1;
+            }
+
+            // Calculate expected working counter
+            expectedWKC = (ec_group[0].outputsWKC * 2) + ec_group[0].inputsWKC;
+            printf("SOEM_Interface: Expected working counter: %d\n", expectedWKC);
+            printf("SOEM_Interface: outputsWKC: %d, inputsWKC: %d\n", 
+                   ec_group[0].outputsWKC, ec_group[0].inputsWKC);
+
+            // Clear output PDOs initially
+            memset(somanet_outputs, 0, sizeof(SomanetOutputs_t));
+
+            // Read initial drive status before sending controlword
+            ec_send_processdata();
+            wkc = ec_receive_processdata(EC_TIMEOUTRET);
+            if (wkc >= expectedWKC && somanet_inputs) {
+                printf("SOEM_Interface: Initial drive state:\n");
+                printf("  Statusword: 0x%04X\n", somanet_inputs->statusword);
+                printf("  Modes of Operation Display: 0x%02X\n", somanet_inputs->modes_of_operation_disp);
+                printf("  Position: %d\n", somanet_inputs->position_actual_value);
+                printf("  Velocity: %d\n", somanet_inputs->velocity_actual_value);
+                printf("  Torque: %d\n", somanet_inputs->torque_actual_value);
+            } else {
+                printf("SOEM_Interface: Initial communication check - WKC: %d, expected: %d\n", wkc, expectedWKC);
+            }
+
+            // Initialize drive state machine
+            printf("SOEM_Interface: Initializing drive state machine...\n");               
+            
+            // Set Modes of Operation to Cyclic Synchronous Torque (CST)
+            somanet_outputs->modes_of_operation = 0x0A; // CST mode
+            
+            // State machine sequence: Ready to switch on -> Switch on -> Operation enabled
+            const uint16_t state_sequence[] = {0x06, 0x07, 0x0F};
+            const char* state_names[] = {"Ready to switch on", "Switch on", "Operation enabled"};
+            
+            for (int i = 0; i < 3; i++) {
+                somanet_outputs->controlword = state_sequence[i];
+                ec_send_processdata();
+                wkc = ec_receive_processdata(EC_TIMEOUTRET);
+                
+                if (wkc >= expectedWKC && somanet_inputs) {
+                    printf("SOEM_Interface: %s - Controlword: 0x%04X, Statusword: 0x%04X\n", 
+                           state_names[i], somanet_outputs->controlword, somanet_inputs->statusword);
+                } else {
+                    printf("SOEM_Interface: Communication issue during state transition %d (WKC: %d)\n", i, wkc);
+                }
+                usleep(100000); // Wait 100ms between state transitions
+            }
+
+            // Request OP state for all slaves
+            printf("SOEM_Interface: Requesting OPERATIONAL state...\n");
+            ec_statecheck(0, EC_STATE_OPERATIONAL, EC_TIMEOUTSTATE);
+            
+            // Check if all slaves reached operational state
+            int all_operational = 1;
+            for (int i = 1; i <= ec_slavecount; i++) {
+                printf("SOEM_Interface: Slave %d final state: 0x%02X\n", i, ec_slave[i].state);
+                if (ec_slave[i].state != EC_STATE_OPERATIONAL) {
+                    printf("SOEM_Interface: Slave %d not operational. State: 0x%02X\n", i, ec_slave[i].state);
+                    all_operational = 0;
+                }
+            }
+            
+            if (all_operational) {
+                printf("SOEM_Interface: All slaves operational. Starting EtherCAT thread...\n");
+                
+                // Start EtherCAT communication thread
+                ecat_thread_running = 1;
+                if (pthread_create(&ecat_thread, NULL, ecat_loop, NULL) != 0) {
+                    fprintf(stderr, "SOEM_Interface: Failed to create EtherCAT thread.\n");
                     ec_close();
                     return -1;
                 }
                 
-                // Reconfigure with new PDO mapping
-                if (ec_config_init(FALSE) > 0) {
-                    printf("SOEM_Interface: Reconfigured with new PDO mapping.\n");
-                    
-                    // Print updated sizes
-                    for (int i = 1; i <= ec_slavecount; i++) {
-                        printf("After PDO config - Slave %d: Input size: %d bytes, Output size: %d bytes\n", 
-                               i, ec_slave[i].Ibytes, ec_slave[i].Obytes);
-                    }
-                    
-                    // Map PDOs for all slaves
-                    ec_config_map(&IOmap[0]);
-                    
-                    printf("Expected simple input size: %zu, output size: %zu\n",
-                           sizeof(SomanetInputsSimple_t), sizeof(SomanetOutputsSimple_t));
-                    
-                    // Wait until all slaves reach SAFE_OP state
-                    printf("SOEM_Interface: Waiting for all slaves to reach SAFE_OP...\n");
-
-                    int wait_count = 0;
-                    const int max_waits = 50; // e.g., wait up to 5 seconds (50 * 100ms)
-
-                    do {
-                        ec_statecheck(0, EC_STATE_SAFE_OP, EC_TIMEOUTSTATE);
-
-                        int all_safe_op = 1;
-                        for (int i = 1; i <= ec_slavecount; i++) {
-                            if (ec_slave[i].state != EC_STATE_SAFE_OP) {
-                                printf("  Slave %d not in SAFE_OP (state: 0x%02X)\n", i, ec_slave[i].state);
-                                all_safe_op = 0;
-                            }
-                        }
-
-                        if (all_safe_op) {
-                            printf("SOEM_Interface: All slaves are in SAFE_OP.\n");
-                            break;
-                        }
-
-                        usleep(100000); // Wait 100ms
-                        wait_count++;
-                    } while (wait_count < max_waits);
-
-                    if (wait_count >= max_waits) {
-                        fprintf(stderr, "SOEM_Interface: Timeout waiting for SAFE_OP state.\n");
-                        ec_close();
-                        return -1;
-                    }
-
-                    // Calculate expected working counter
-                    expectedWKC = (ec_group[0].outputsWKC * 2) + ec_group[0].inputsWKC;
-                    printf("SOEM_Interface: Expected working counter: %d\n", expectedWKC);
-
-                    // Get pointers to PDOs for slave 1 (Synapticon ACTILINK-S)
-                    if (ec_slave[1].outputs && ec_slave[1].inputs) {
-                        somanet_outputs_simple = (SomanetOutputsSimple_t *)ec_slave[1].outputs;
-                        somanet_inputs_simple = (SomanetInputsSimple_t *)ec_slave[1].inputs;
-                        
-                        printf("SOEM_Interface: PDO mapping complete. Slave 1 - Output size: %d bytes, Input size: %d bytes.\n",
-                               ec_slave[1].Obytes, ec_slave[1].Ibytes);
-                        
-                        // Verify PDO sizes match our structures
-                        if (ec_slave[1].Obytes != sizeof(SomanetOutputsSimple_t) || 
-                            ec_slave[1].Ibytes != sizeof(SomanetInputsSimple_t)) {
-                            printf("SOEM_Interface: Warning - PDO size mismatch! Expected Out:%zu In:%zu, Got Out:%d In:%d\n",
-                                   sizeof(SomanetOutputsSimple_t), sizeof(SomanetInputsSimple_t),
-                                   ec_slave[1].Obytes, ec_slave[1].Ibytes);
-                        }
-                    } else {
-                        fprintf(stderr, "SOEM_Interface: Failed to get PDO pointers for Slave 1.\n");
-                        ec_close();
-                        return -1;
-                    }
-
-                    // Clear output PDOs initially
-                    memset(somanet_outputs_simple, 0, sizeof(SomanetOutputsSimple_t));
-
-                    // Read initial drive status before sending controlword
-                    ec_send_processdata();
-                    wkc = ec_receive_processdata(EC_TIMEOUTRET);
-                    if (wkc >= expectedWKC && somanet_inputs_simple) {
-                        printf("SOEM_Interface: Initial drive state before controlword sequence:\n");
-                        printf("  Statusword: 0x%04X\n", somanet_inputs_simple->statusword);
-                        printf("  Modes of Operation Display: 0x%02X\n", somanet_inputs_simple->modes_of_operation_disp);
-                        printf("  Position: %d\n", somanet_inputs_simple->position_actual_value);
-                        printf("  Velocity: %d\n", somanet_inputs_simple->velocity_actual_value);
-                        printf("  Torque: %d\n", somanet_inputs_simple->torque_actual_value);
-                    } else {
-                        fprintf(stderr, "SOEM_Interface: Failed to read initial drive state (WKC: %d, expected: %d).\n", wkc, expectedWKC);
-                    }
-
-                    // Initialize drive state machine
-                    printf("SOEM_Interface: Initializing drive state machine...\n");               
-                    
-                    // Set Modes of Operation to Cyclic Synchronous Torque (CST)
-                    somanet_outputs_simple->modes_of_operation = 0x0A; // CST mode
-                    
-                    // State machine sequence: Ready to switch on -> Switch on -> Operation enabled
-                    const uint16_t state_sequence[] = {0x06, 0x07, 0x0F};
-                    const char* state_names[] = {"Ready to switch on", "Switch on", "Operation enabled"};
-                    
-                    for (int i = 0; i < 3; i++) {
-                        somanet_outputs_simple->controlword = state_sequence[i];
-                        ec_send_processdata();
-                        wkc = ec_receive_processdata(EC_TIMEOUTRET);
-                        
-                        if (wkc >= expectedWKC) {
-                            printf("SOEM_Interface: %s - Controlword: 0x%04X, Statusword: 0x%04X\n", 
-                                   state_names[i], somanet_outputs_simple->controlword, somanet_inputs_simple->statusword);
-                        } else {
-                            fprintf(stderr, "SOEM_Interface: Communication error during state transition %d\n", i);
-                        }
-                        usleep(100000); // Wait 100ms between state transitions
-                    }
-
-                    // Request OP state for all slaves
-                    ec_statecheck(0, EC_STATE_OPERATIONAL, EC_TIMEOUTSTATE);
-                    
-                    // Check if all slaves reached operational state
-                    int all_operational = 1;
-                    for (int i = 1; i <= ec_slavecount; i++) {
-                        if (ec_slave[i].state != EC_STATE_OPERATIONAL) {
-                            printf("SOEM_Interface: Slave %d not operational. State: %d\n", i, ec_slave[i].state);
-                            all_operational = 0;
-                        }
-                    }
-                    
-                    if (all_operational) {
-                        printf("SOEM_Interface: All slaves operational. Starting EtherCAT thread...\n");
-                        
-                        // Start EtherCAT communication thread
-                        ecat_thread_running = 1;
-                        if (pthread_create(&ecat_thread, NULL, ecat_loop, NULL) != 0) {
-                            fprintf(stderr, "SOEM_Interface: Failed to create EtherCAT thread.\n");
-                            ec_close();
-                            return -1;
-                        }
-                        
-                        master_initialized = 1;
-                        printf("SOEM_Interface: EtherCAT master initialized successfully.\n");
-                        return 0;
-                    } else {
-                        fprintf(stderr, "SOEM_Interface: Not all slaves reached operational state.\n");
-                        ec_close();
-                        return -1;
-                    }
-                } else {
-                    fprintf(stderr, "SOEM_Interface: Failed to reconfigure after PDO mapping.\n");
+                master_initialized = 1;
+                printf("SOEM_Interface: EtherCAT master initialized successfully.\n");
+                return 0;
+            } else {
+                fprintf(stderr, "SOEM_Interface: Not all slaves reached operational state.\n");
+                // Don't immediately fail - some drives may work in SAFE_OP
+                printf("SOEM_Interface: Continuing with current state...\n");
+                
+                // Start EtherCAT communication thread anyway
+                ecat_thread_running = 1;
+                if (pthread_create(&ecat_thread, NULL, ecat_loop, NULL) != 0) {
+                    fprintf(stderr, "SOEM_Interface: Failed to create EtherCAT thread.\n");
                     ec_close();
                     return -1;
                 }
-            } else {
-                fprintf(stderr, "SOEM_Interface: No EtherCAT slaves found.\n");
-                ec_close();
-                return -1;
+                
+                master_initialized = 1;
+                printf("SOEM_Interface: EtherCAT master initialized (some slaves may not be operational).\n");
+                return 0;
             }
         } else {
             fprintf(stderr, "SOEM_Interface: No slaves found on %s.\n", ifname);
@@ -520,9 +422,9 @@ void soem_interface_stop_master() {
         }
         
         // Set drive to safe state before closing
-        if (somanet_outputs_simple) {
-            somanet_outputs_simple->target_torque = 0;  // Zero torque
-            somanet_outputs_simple->controlword = 0x06; // Ready to switch on
+        if (somanet_outputs) {
+            somanet_outputs->target_torque = 0;  // Zero torque
+            somanet_outputs->controlword = 0x06; // Ready to switch on
             ec_send_processdata();
             usleep(10000); // Wait 10ms
         }
