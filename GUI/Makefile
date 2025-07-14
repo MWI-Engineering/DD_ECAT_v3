@@ -4,8 +4,8 @@
 CC = gcc
 
 # Compiler flags
-#   -I/home/mwi/SOEM/install/include/soem: Add this line for SOEM headers
-CFLAGS = -Wall -Wextra -pthread -I/home/mwi/SOEM/install/include/soem
+#   -I/home/mwi/DD_ECAT_v3: Add this line for HID interface
+CFLAGS = -Wall -Wextra -pthread -I/home/mwi/DD_ECAT_v3
 
 # Linker flags
 LDFLAGS = -lpthread -ljson-c -lm
