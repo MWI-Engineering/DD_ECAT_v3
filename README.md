@@ -97,13 +97,9 @@ This step is critical. If it fails, do not proceed. Check your cabling, power, a
 
 ##### to do:
 
-- Update the create_ffb_gadget.sh so it will work = done
-- Update hid_interface.c with aditional FFB cases = done
-- Update ffb_calculator.c with the expanded ffb_calculator.h.= done
-- Update soem_interface.c and .h with the new ffb_calculator and hid_interfaces = done
-- Update main.c = done
-- **Next steps:**
 - Check via claude.ai (pro) all files if it works all together correctly.
+- Debug SOEM interface, the LED ring stays red during operation. Indicating there is a mismatch in PDO mapping.
+- Fix HID interface bug.
 
 #### Phase 4: USB HID Gadget Setup
 
