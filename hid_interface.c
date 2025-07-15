@@ -90,7 +90,7 @@ typedef struct {
 } ffb_device_control_report_t;
 
 // Parse FFB reports according to your HID descriptor
-static int parse_ffb_report(uint8_t *report, int len, ffb_effect_t *effect) {
+static int parse_ffb_report(uint8_t *report, size_t len, ffb_effect_t *effect) {
     if (len < 2) return 0;
     
     uint8_t report_id = report[0];
@@ -256,21 +256,22 @@ static int parse_ffb_report(uint8_t *report, int len, ffb_effect_t *effect) {
 
 // --- Private function for FFB reception ---
 static void* _usb_ffb_reception_thread(void* arg) {
+    (void)arg; // Suppress unused parameter warning
     uint8_t report[HID_REPORT_SIZE];
 
     printf("FFB: Reception thread started\n");
     
     while (hid_running) {
-        int len = read(hidg_fd, report, HID_REPORT_SIZE);
+        ssize_t len = read(hidg_fd, report, HID_REPORT_SIZE);
         if (len > 0) {
-            printf("FFB: Received %d bytes: ", len);
-            for (int i = 0; i < len && i < 8; i++) {
+            printf("FFB: Received %zd bytes: ", len);
+            for (ssize_t i = 0; i < len && i < 8; i++) {
                 printf("0x%02X ", report[i]);
             }
             printf("\n");
             
             ffb_effect_t new_effect;
-            if (parse_ffb_report(report, len, &new_effect)) {
+            if (parse_ffb_report(report, (size_t)len, &new_effect)) {
                 pthread_mutex_lock(&queue_mutex);
                 if (queue_count < FFB_EFFECT_QUEUE_SIZE) {
                     ffb_effect_queue[queue_tail] = new_effect;
@@ -378,10 +379,10 @@ void hid_interface_send_gamepad_report(float position, unsigned int buttons) {
     report[2] = buttons & 0xFF;
     report[3] = (buttons >> 8) & 0xFF;
 
-    int bytes_written = write(hidg_fd, report, HID_REPORT_SIZE);
+    ssize_t bytes_written = write(hidg_fd, report, HID_REPORT_SIZE);
     if (bytes_written < 0) {
         perror("HIDInterface: Failed to send gamepad report");
     }
     // Remove the debug print to avoid spam
-    // printf("HIDInterface: Sent gamepad report (%d bytes)\n", bytes_written);
+    // printf("HIDInterface: Sent gamepad report (%zd bytes)\n", bytes_written);
 }

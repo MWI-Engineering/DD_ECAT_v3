@@ -115,7 +115,7 @@ void *ecat_loop(void *ptr) {
             pthread_mutex_unlock(&pdo_mutex);
         } else {
             communication_ok = 0;
-            // printf("SOEM_Interface: WKC mismatch: %d/%d\n", wkc, expectedWKC);
+            //printf("SOEM_Interface: WKC mismatch: %d/%d\n", wkc, expectedWKC);
         }
 
         // Check slave state - use helper function
