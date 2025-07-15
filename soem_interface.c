@@ -70,6 +70,8 @@ static float current_velocity_f = 0.0f;
 int is_slave_operational(int slave_idx) {
     // Check if slave is in operational state (bit 3 set)
     // State 18 (0x12) = EC_STATE_OPERATIONAL (8) + EC_STATE_ACK (16)
+    // A more robust check might involve checking for EC_STATE_OPERATIONAL only,
+    // and then verifying the statusword for drive readiness.
     return (ec_slave[slave_idx].state & EC_STATE_OPERATIONAL) == EC_STATE_OPERATIONAL;
 }
 
@@ -95,6 +97,14 @@ void *ecat_loop(void *ptr) {
         // Send process data
         pthread_mutex_lock(&pdo_mutex);
         if (somanet_outputs) {
+            // Continuously set controlword to enable operation (0x0F) if in operational state
+            // This ensures the drive remains active.
+            if (is_slave_operational(slave_idx)) {
+                somanet_outputs->controlword = 0x0F; // Enable Operation
+            } else {
+                // If not operational, you might want to set a safe controlword or try to transition
+                somanet_outputs->controlword = 0x06; // Shutdown state
+            }
             somanet_outputs->target_torque = (int16_t)(target_torque_f * 1000.0f); // Assuming torque is in mNm
             // Other outputs can be set here if needed
         }
@@ -120,7 +130,9 @@ void *ecat_loop(void *ptr) {
 
         // Check slave state - use helper function
         if (!is_slave_operational(slave_idx)) {
-            // printf("SOEM_Interface: Slave %d not in OP state, current state: %d\n", slave_idx, ec_slave[slave_idx].state);
+             // printf("SOEM_Interface: Slave %d not in OP state, current state: %d\n", slave_idx, ec_slave[slave_idx].state);
+            // Attempt to transition to operational if not already there.
+            // This might be redundant if the main init handles it, but good for robustness.
             ec_statecheck(slave_idx, EC_STATE_OPERATIONAL, EC_TIMEOUTSTATE);
         }
 
@@ -263,11 +275,53 @@ int soem_interface_configure_pdo_mapping(uint16_t slave_idx, uint16_t pdo_assign
 cleanup:
     // Transition back to Operational state
     printf("SOEM_Interface: Attempting to transition back to Operational state...\n");
-    // Check if the slave is in operational state (allowing for ACK_STATE bit)
-    if (soem_interface_set_ethercat_state(slave_idx, EC_STATE_OPERATIONAL) != 0) {
-        fprintf(stderr, "SOEM_Interface: Failed to transition back to Operational state.\n");
-        ret = -1; // Indicate failure even if PDO mapping was partially successful
+    // This transition will be handled by the main init function after drive configuration
+    return ret;
+}
+
+// --- Function to configure drive modes and controlword via SDOs ---
+// This function sets the Modes of Operation and Controlword to bring the drive
+// to a state where it can accept operational commands.
+// @param slave_idx The index of the slave (1-based).
+// @param mode_of_operation The desired mode of operation (e.g., 8 for CSP, 1 for PPM).
+// @return 0 on success, -1 on failure.
+int soem_interface_configure_drive_modes(uint16_t slave_idx, int8_t mode_of_operation) {
+    uint16_t controlword_val;
+    int ret = 0;
+
+    printf("SOEM_Interface: Configuring drive modes for slave %u...\n", slave_idx);
+
+    // 1. Set Modes of Operation (0x6060:00)
+    printf("SOEM_Interface: Setting Modes of Operation (0x6060:00) to %d...\n", mode_of_operation);
+    if (soem_interface_write_sdo(slave_idx, 0x6060, 0x00, sizeof(mode_of_operation), &mode_of_operation) != 0) {
+        fprintf(stderr, "SOEM_Interface: Failed to set Modes of Operation.\n");
+        return -1;
     }
+    usleep(10000);
+
+    // 2. Controlword sequence to "Switch On" (0x07)
+    // This sequence is typically required after setting modes of operation.
+    // Refer to CiA 402 state machine for details.
+    controlword_val = 0x06; // Shutdown
+    printf("SOEM_Interface: Setting Controlword (0x6040:00) to 0x%04X (Shutdown)...\n", controlword_val);
+    if (soem_interface_write_sdo(slave_idx, 0x6040, 0x00, sizeof(controlword_val), &controlword_val) != 0) {
+        fprintf(stderr, "SOEM_Interface: Failed to set Controlword to Shutdown.\n");
+        return -1;
+    }
+    usleep(10000);
+
+    controlword_val = 0x07; // Switch On
+    printf("SOEM_Interface: Setting Controlword (0x6040:00) to 0x%04X (Switch On)...\n", controlword_val);
+    if (soem_interface_write_sdo(slave_idx, 0x6040, 0x00, sizeof(controlword_val), &controlword_val) != 0) {
+        fprintf(stderr, "SOEM_Interface: Failed to set Controlword to Switch On.\n");
+        return -1;
+    }
+    usleep(10000);
+
+    // At this point, the drive should be in "Ready to Switch On" or "Switched On" state.
+    // The final "Enable Operation" (0x0F) will be done via PDO in the ecat_loop once in Operational state.
+
+    printf("SOEM_Interface: Drive modes configured for slave %u.\n", slave_idx);
     return ret;
 }
 
@@ -379,6 +433,14 @@ int soem_interface_init(const char *ifname) {
                     return -1;
                 }
 
+                // --- IMPORTANT: Configure drive modes and controlword after PDO mapping ---
+                // Assuming "Cyclic Synchronous Position Mode" (CSP) as an example (mode 8).
+                // Adjust this mode based on your Synapticon drive's documentation and desired operation.
+                if (soem_interface_configure_drive_modes(slave_idx, 8) != 0) {
+                    fprintf(stderr, "SOEM_Interface: Failed to configure drive modes.\n");
+                    return -1;
+                }
+
             } else {
                 fprintf(stderr, "SOEM_Interface: Synapticon slave (index %d) not found.\n", slave_idx);
                 return -1;
@@ -386,7 +448,8 @@ int soem_interface_init(const char *ifname) {
 
             // Go to Operational state
             printf("SOEM_Interface: Requesting Operational state for all slaves...\n");
-            ec_statecheck(0, EC_STATE_OPERATIONAL, EC_TIMEOUTSTATE * 3); // Wait longer for all slaves
+            // Increased timeout as drive state transitions can take longer
+            ec_statecheck(0, EC_STATE_OPERATIONAL, EC_TIMEOUTSTATE * 5);
 
             // Check if all slaves are operational
             int all_slaves_operational = 1;
@@ -411,7 +474,7 @@ int soem_interface_init(const char *ifname) {
             } else {
                 fprintf(stderr, "SOEM_Interface: Not all slaves reached Operational state.\n");
                 for (i = 1; i <= ec_slavecount; i++) {
-                    printf("SOEM_Interface: Slave %d: Current State=%d (Operational=%s)\n", 
+                    printf("SOEM_Interface: Slave %d: Current State=%d (Operational=%s)\n",
                            i, ec_slave[i].state, is_slave_operational(i) ? "YES" : "NO");
                 }
                 return -1;
