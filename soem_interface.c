@@ -1,4 +1,4 @@
-// soem_interface.c - Fixed version with proper PDO configuration and dynamic PDO mapping
+// soem_interface.c - Fixed version with correct state checking and improved PDO configuration
 #include "soem_interface.h"
 #include <stdio.h>
 #include <unistd.h>
@@ -67,10 +67,25 @@ static float current_position_f = 0.0f;
 static float current_velocity_f = 0.0f;
 
 // --- Helper function to check if slave is in operational state ---
+// Fixed: EtherCAT state can include ACK bit (0x10), so we need to mask it out
 int is_slave_operational(int slave_idx) {
-    // Check if slave is in operational state (bit 3 set)
-    // State 18 (0x12) = EC_STATE_OPERATIONAL (8) + EC_STATE_ACK (16)
-    return (ec_slave[slave_idx].state & EC_STATE_OPERATIONAL) == EC_STATE_OPERATIONAL;
+    // Extract the actual state by masking out the ACK bit
+    uint16 actual_state = ec_slave[slave_idx].state & 0x0F;
+    // Check if the actual state is operational (8)
+    return actual_state == EC_STATE_OPERATIONAL;
+}
+
+// --- Helper function to get readable state name ---
+const char* get_state_name(uint16 state) {
+    uint16 actual_state = state & 0x0F;
+    switch(actual_state) {
+        case EC_STATE_INIT: return "INIT";
+        case EC_STATE_PRE_OP: return "PRE_OP";
+        case EC_STATE_BOOT: return "BOOT";
+        case EC_STATE_SAFE_OP: return "SAFE_OP";
+        case EC_STATE_OPERATIONAL: return "OPERATIONAL";
+        default: return "UNKNOWN";
+    }
 }
 
 // --- SOEM Thread Function ---
@@ -120,7 +135,8 @@ void *ecat_loop(void *ptr) {
 
         // Check slave state - use helper function
         if (!is_slave_operational(slave_idx)) {
-            // printf("SOEM_Interface: Slave %d not in OP state, current state: %d\n", slave_idx, ec_slave[slave_idx].state);
+            // printf("SOEM_Interface: Slave %d not in OP state, current state: %s (%d)\n", 
+            //        slave_idx, get_state_name(ec_slave[slave_idx].state), ec_slave[slave_idx].state);
             ec_statecheck(slave_idx, EC_STATE_OPERATIONAL, EC_TIMEOUTSTATE);
         }
 
@@ -150,23 +166,42 @@ int soem_interface_write_sdo(uint16_t slave_idx, uint16_t index, uint8_t subinde
     return 0;
 }
 
+// --- Helper function for SDO reads ---
+int soem_interface_read_sdo(uint16_t slave_idx, uint16_t index, uint8_t subindex, uint16_t data_size, void *data) {
+    int wkc_sdo;
+    wkc_sdo = ec_SDOread(slave_idx, index, subindex, FALSE, &data_size, data, EC_TIMEOUTRXM);
+    if (wkc_sdo == 0) {
+        fprintf(stderr, "SOEM_Interface: SDO read failed for slave %u, index 0x%04X:%02X\n", slave_idx, index, subindex);
+        return -1;
+    }
+    return 0;
+}
+
 // --- Function to set EtherCAT slave state ---
 // This function attempts to set a specific EtherCAT slave to a desired state.
 // @param slave_idx The index of the slave (1-based).
 // @param desired_state The target EtherCAT state (e.g., EC_STATE_PRE_OP, EC_STATE_OPERATIONAL).
 // @return 0 on success, -1 on failure.
-int soem_interface_set_ethercat_state(uint16_t slave_idx, ec_state desired_state) { // Changed ec_state_t to ec_state
+int soem_interface_set_ethercat_state(uint16_t slave_idx, ec_state desired_state) {
     int wkc_state;
-    printf("SOEM_Interface: Attempting to set slave %u to state %d...\n", slave_idx, desired_state);
+    printf("SOEM_Interface: Attempting to set slave %u to state %s (%d)...\n", 
+           slave_idx, get_state_name(desired_state), desired_state);
+    
     ec_slave[slave_idx].state = desired_state;
     ec_writestate(slave_idx);
+    
+    // Wait for state transition with timeout
     wkc_state = ec_statecheck(slave_idx, desired_state, EC_TIMEOUTSTATE);
+    
     if (wkc_state == 0) {
-        fprintf(stderr, "SOEM_Interface: Failed to set slave %u to state %d. Current state: %d\n",
-                slave_idx, desired_state, ec_slave[slave_idx].state);
+        fprintf(stderr, "SOEM_Interface: Failed to set slave %u to state %s (%d). Current state: %s (%d)\n",
+                slave_idx, get_state_name(desired_state), desired_state, 
+                get_state_name(ec_slave[slave_idx].state), ec_slave[slave_idx].state);
         return -1;
     }
-    printf("SOEM_Interface: Slave %u successfully transitioned to state %d.\n", slave_idx, ec_slave[slave_idx].state);
+    
+    printf("SOEM_Interface: Slave %u successfully transitioned to state %s (%d).\n", 
+           slave_idx, get_state_name(ec_slave[slave_idx].state), ec_slave[slave_idx].state);
     return 0;
 }
 
@@ -181,8 +216,7 @@ int soem_interface_set_ethercat_state(uint16_t slave_idx, ec_state desired_state
 // @return 0 on success, -1 on failure.
 int soem_interface_configure_pdo_mapping(uint16_t slave_idx, uint16_t pdo_assign_idx, uint16_t pdo_map_idx, uint32_t *mapped_objects, uint8_t num_mapped_objects) {
     uint8_t zero_val = 0;
-    uint8_t original_rx_assign_val = 3; // Default for 0x1C12:00
-    uint8_t original_tx_assign_val = 4; // Default for 0x1C13:00
+    uint8_t original_assign_val;
     uint8_t current_assign_val;
     int ret = 0;
 
@@ -197,13 +231,23 @@ int soem_interface_configure_pdo_mapping(uint16_t slave_idx, uint16_t pdo_assign
         fprintf(stderr, "SOEM_Interface: Failed to transition to Pre-operational state.\n");
         return -1;
     }
-    usleep(10000); // Give slave time to settle
+    usleep(50000); // Give slave more time to settle (50ms)
 
     // Read current PDO assign value before disabling to restore later
-    // Note: ec_SDOread is needed here, but SOEM's ec_SDOread returns wkc, not data directly.
-    // For simplicity, we'll assume default values for restoration.
-    // In a robust application, you'd read the current value first.
-    // For now, we'll use the default values as per Synapticon documentation.
+    uint16_t read_size = sizeof(original_assign_val);
+    if (soem_interface_read_sdo(slave_idx, pdo_assign_idx, 0x00, read_size, &original_assign_val) != 0) {
+        // If read fails, use defaults as per Synapticon documentation
+        printf("SOEM_Interface: Could not read current PDO assign value, using defaults.\n");
+        if (pdo_assign_idx == 0x1C12) { // RxPDO assign
+            original_assign_val = 3;
+        } else if (pdo_assign_idx == 0x1C13) { // TxPDO assign
+            original_assign_val = 4;
+        } else {
+            fprintf(stderr, "SOEM_Interface: Unknown PDO assign index 0x%04X.\n", pdo_assign_idx);
+            return -1;
+        }
+    }
+    printf("SOEM_Interface: Original PDO assign value for 0x%04X:00 is %u\n", pdo_assign_idx, original_assign_val);
 
     // 3. Disable PDO distribution by setting 0 to 0x1C12:00 (for RxPDO) or setting 0 to 0x1C13:00 (for TxPDO)
     printf("SOEM_Interface: Disabling PDO distribution for 0x%04X:00...\n", pdo_assign_idx);
@@ -211,7 +255,7 @@ int soem_interface_configure_pdo_mapping(uint16_t slave_idx, uint16_t pdo_assign
         fprintf(stderr, "SOEM_Interface: Failed to disable PDO distribution.\n");
         ret = -1; goto cleanup;
     }
-    usleep(10000);
+    usleep(20000); // 20ms delay
 
     // 4. Disable one of the PDO mapping objects by setting its subindex 0 to 0
     printf("SOEM_Interface: Disabling PDO mapping object 0x%04X:00...\n", pdo_map_idx);
@@ -219,7 +263,7 @@ int soem_interface_configure_pdo_mapping(uint16_t slave_idx, uint16_t pdo_assign
         fprintf(stderr, "SOEM_Interface: Failed to disable PDO mapping object.\n");
         ret = -1; goto cleanup;
     }
-    usleep(10000);
+    usleep(20000); // 20ms delay
 
     // 5. Enter the objects that should be mapped to the mapping entry subindices 1 to n
     printf("SOEM_Interface: Writing %u mapped objects to 0x%04X...\n", num_mapped_objects, pdo_map_idx);
@@ -230,7 +274,7 @@ int soem_interface_configure_pdo_mapping(uint16_t slave_idx, uint16_t pdo_assign
             fprintf(stderr, "SOEM_Interface: Failed to write mapped object %u.\n", i + 1);
             ret = -1; goto cleanup;
         }
-        usleep(1000); // Small delay between SDO writes
+        usleep(5000); // 5ms delay between SDO writes
     }
 
     // 6. Set subindex 0 to the number n of used entries
@@ -239,38 +283,34 @@ int soem_interface_configure_pdo_mapping(uint16_t slave_idx, uint16_t pdo_assign
         fprintf(stderr, "SOEM_Interface: Failed to set number of mapped objects.\n");
         ret = -1; goto cleanup;
     }
-    usleep(10000);
+    usleep(20000); // 20ms delay
 
-    // 7. Enable PDO distribution by setting 0x1C12:00 or 0x1C13:00 to their original values, by default 3 and 4 respectively
-    printf("SOEM_Interface: Re-enabling PDO distribution for 0x%04X:00...\n", pdo_assign_idx);
-    if (pdo_assign_idx == 0x1C12) { // RxPDO assign
-        current_assign_val = original_rx_assign_val;
-    } else if (pdo_assign_idx == 0x1C13) { // TxPDO assign
-        current_assign_val = original_tx_assign_val;
-    } else {
-        fprintf(stderr, "SOEM_Interface: Unknown PDO assign index 0x%04X.\n", pdo_assign_idx);
-        ret = -1; goto cleanup;
-    }
-
-    if (soem_interface_write_sdo(slave_idx, pdo_assign_idx, 0x00, sizeof(current_assign_val), &current_assign_val) != 0) {
+    // 7. Enable PDO distribution by setting 0x1C12:00 or 0x1C13:00 to their original values
+    printf("SOEM_Interface: Re-enabling PDO distribution for 0x%04X:00 with value %u...\n", pdo_assign_idx, original_assign_val);
+    if (soem_interface_write_sdo(slave_idx, pdo_assign_idx, 0x00, sizeof(original_assign_val), &original_assign_val) != 0) {
         fprintf(stderr, "SOEM_Interface: Failed to re-enable PDO distribution.\n");
         ret = -1; goto cleanup;
     }
-    usleep(10000);
+    usleep(20000); // 20ms delay
 
     printf("SOEM_Interface: PDO mapping configuration completed for slave %u.\n", slave_idx);
 
 cleanup:
-    // Transition back to Operational state
+    // Always attempt to transition back to Safe-Operational first, then Operational
+    printf("SOEM_Interface: Attempting to transition back to Safe-Operational state...\n");
+    if (soem_interface_set_ethercat_state(slave_idx, EC_STATE_SAFE_OP) != 0) {
+        fprintf(stderr, "SOEM_Interface: Failed to transition to Safe-Operational state.\n");
+        ret = -1;
+    }
+    usleep(50000); // 50ms delay
+    
     printf("SOEM_Interface: Attempting to transition back to Operational state...\n");
-    // Check if the slave is in operational state (allowing for ACK_STATE bit)
     if (soem_interface_set_ethercat_state(slave_idx, EC_STATE_OPERATIONAL) != 0) {
         fprintf(stderr, "SOEM_Interface: Failed to transition back to Operational state.\n");
-        ret = -1; // Indicate failure even if PDO mapping was partially successful
+        ret = -1;
     }
     return ret;
 }
-
 
 // --- SOEM Interface Functions ---
 
@@ -304,8 +344,9 @@ int soem_interface_init(const char *ifname) {
 
             // Print slave information
             for (i = 1; i <= ec_slavecount; i++) {
-                printf("SOEM_Interface: Slave %d: Name=%s, OutputSize=%dbytes, InputSize=%dbytes, State=%d\n",
-                       i, ec_slave[i].name, ec_slave[i].Obits / 8, ec_slave[i].Ibits / 8, ec_slave[i].state);
+                printf("SOEM_Interface: Slave %d: Name=%s, OutputSize=%dbytes, InputSize=%dbytes, State=%s (%d)\n",
+                       i, ec_slave[i].name, ec_slave[i].Obits / 8, ec_slave[i].Ibits / 8, 
+                       get_state_name(ec_slave[i].state), ec_slave[i].state);
             }
 
             // Check for Synapticon slave (by name or vendor ID/product code)
@@ -315,7 +356,7 @@ int soem_interface_init(const char *ifname) {
 
                 // Define custom RxPDO mapping for Synapticon ACTILINK-S ---
                 // Objects are (Index << 16 | Subindex << 8 | LengthInBits)
-                // Example objects (adjust based on your exact needs and device object dictionary)
+                // Based on Synapticon documentation, use standard CiA 402 objects
                 uint32_t custom_rx_mapped_objects[] = {
                     0x60400010, // 0x6040:00 Controlword (16 bits)
                     0x60600008, // 0x6060:00 Modes of operation (8 bits)
@@ -323,8 +364,6 @@ int soem_interface_init(const char *ifname) {
                     0x607A0020, // 0x607A:00 Target position (32 bits)
                     0x60FF0020, // 0x60FF:00 Target velocity (32 bits)
                     0x60B20010, // 0x60B2:00 Torque offset (16 bits)
-                    // Add padding if required by LAN9252 (e.g., 0x00000020 for 32-bit dummy)
-                    // 0x00000020 // Example padding (Index 0x0000, Subindex 0x00, Length 32 bits)
                 };
                 uint8_t num_rx_mapped_objects = sizeof(custom_rx_mapped_objects) / sizeof(custom_rx_mapped_objects[0]);
 
@@ -343,8 +382,6 @@ int soem_interface_init(const char *ifname) {
                     0x60690020, // 0x6069:00 Velocity actual value (32 bits)
                     0x60770010, // 0x6077:00 Torque actual value (16 bits)
                     0x60780010, // 0x6078:00 Current actual value (16 bits)
-                    // Add padding if required by LAN9252
-                    // 0x00000020 // Example padding
                 };
                 uint8_t num_tx_mapped_objects = sizeof(custom_tx_mapped_objects) / sizeof(custom_tx_mapped_objects[0]);
 
@@ -386,14 +423,18 @@ int soem_interface_init(const char *ifname) {
 
             // Go to Operational state
             printf("SOEM_Interface: Requesting Operational state for all slaves...\n");
-            ec_statecheck(0, EC_STATE_OPERATIONAL, EC_TIMEOUTSTATE * 3); // Wait longer for all slaves
+            ec_statecheck(0, EC_STATE_OPERATIONAL, EC_TIMEOUTSTATE * 4); // Wait longer for all slaves
 
-            // Check if all slaves are operational
+            // Check if all slaves are operational with improved state checking
             int all_slaves_operational = 1;
             for (i = 1; i <= ec_slavecount; i++) {
                 if (!is_slave_operational(i)) {
-                    printf("SOEM_Interface: Slave %d not operational. Current state: %d\n", i, ec_slave[i].state);
+                    printf("SOEM_Interface: Slave %d not operational. Current state: %s (%d)\n", 
+                           i, get_state_name(ec_slave[i].state), ec_slave[i].state);
                     all_slaves_operational = 0;
+                } else {
+                    printf("SOEM_Interface: Slave %d is operational. Current state: %s (%d)\n", 
+                           i, get_state_name(ec_slave[i].state), ec_slave[i].state);
                 }
             }
 
@@ -411,8 +452,9 @@ int soem_interface_init(const char *ifname) {
             } else {
                 fprintf(stderr, "SOEM_Interface: Not all slaves reached Operational state.\n");
                 for (i = 1; i <= ec_slavecount; i++) {
-                    printf("SOEM_Interface: Slave %d: Current State=%d (Operational=%s)\n", 
-                           i, ec_slave[i].state, is_slave_operational(i) ? "YES" : "NO");
+                    printf("SOEM_Interface: Slave %d: Current State=%s (%d) (Operational=%s)\n", 
+                           i, get_state_name(ec_slave[i].state), ec_slave[i].state, 
+                           is_slave_operational(i) ? "YES" : "NO");
                 }
                 return -1;
             }
