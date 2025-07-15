@@ -373,7 +373,7 @@ int soem_interface_configure_drive_modes(uint16_t slave_idx, int8_t mode_of_oper
         fprintf(stderr, "SOEM_Interface: Failed to set Controlword to Shutdown.\n");
         return -1;
     }
-    usleep(10000); // Give drive time to process
+    usleep(20000); // Added a slightly longer delay here before first status read
 
     // Poll Statusword until "Ready to Switch On" (0x21)
     // CiA 402 Statusword bits for "Ready to Switch On":
@@ -384,22 +384,25 @@ int soem_interface_configure_drive_modes(uint16_t slave_idx, int8_t mode_of_oper
     // Bit 4 (Voltage enabled) = 1
     // Bit 5 (Quick stop) = 1 (usually active by default)
     // Bit 6 (Switch on disabled) = 0
-    // So, expected pattern: X011 0001 (0x31) or X010 0001 (0x21) if quick stop is not active
-    // We'll check for 0x21 (0b00100001) which means Ready to Switch On (bit 0) and Voltage Enabled (bit 4) and Quick Stop (bit 5) are active.
+    // Expected pattern for Ready to Switch On: Bit 0 (Ready to switch on) = 1, Bit 4 (Voltage Enabled) = 1, Bit 5 (Quick Stop) = 1
+    // Other bits should be 0 for this state.
     attempts = 0;
     do {
         if (soem_interface_read_sdo(slave_idx, 0x6041, 0x00, sizeof(statusword_val), &statusword_val) != 0) {
-            fprintf(stderr, "SOEM_Interface: Failed to read Statusword during Shutdown check.\n");
+            fprintf(stderr, "SOEM_Interface: Failed to read Statusword during Ready to Switch On check.\n");
             return -1;
         }
         printf("SOEM_Interface: Slave %u Statusword: 0x%04X (Expected Ready to Switch On: 0x21)\n", slave_idx, statusword_val);
         // Check for specific bits: Ready to switch on (0), Voltage enabled (4), Quick stop (5)
         // And ensure Switched on (1), Operation enabled (2), Fault (3), Switch on disabled (6) are 0
-        if (((statusword_val & 0x47) == 0x21) && // Check bits 0,1,2,4,5,6. Expected 0x21 (0b00100001) for bits 0,4,5
-            !((statusword_val >> 1) & 0x01) &&    // Bit 1 (Switched on) is 0
-            !((statusword_val >> 2) & 0x01) &&    // Bit 2 (Operation enabled) is 0
-            !((statusword_val >> 3) & 0x01) &&    // Bit 3 (Fault) is 0
-            !((statusword_val >> 6) & 0x01))      // Bit 6 (Switch on disabled) is 0
+        // Simplified check: Focus on bits 0, 1, 2, 3, 4, 5, 6
+        // Expected for Ready to Switch On: Bit 0=1, Bit 1=0, Bit 2=0, Bit 3=0, Bit 4=1, Bit 5=1, Bit 6=0
+        // Mask 0x7F (bits 0-6)
+        // Expected value for 0x21 (0b00100001) would be 0x21. If Quick Stop is also active (bit 5), it's 0x21 | 0x20 = 0x31.
+        // Let's check for the *minimum* required bits for "Ready to Switch On" (bit 0 and bit 4) and ensure no fault (bit 3).
+        if ((statusword_val & 0x01) && // Bit 0 (Ready to switch on) is 1
+            ((statusword_val >> 4) & 0x01) && // Bit 4 (Voltage enabled) is 1
+            !((statusword_val >> 3) & 0x01)) // Bit 3 (Fault) is 0
         {
             printf("SOEM_Interface: Slave %u is Ready to Switch On.\n", slave_idx);
             break;
@@ -431,7 +434,8 @@ int soem_interface_configure_drive_modes(uint16_t slave_idx, int8_t mode_of_oper
     // Bit 4 (Voltage enabled) = 1
     // Bit 5 (Quick stop) = 1 (usually active by default)
     // Bit 6 (Switch on disabled) = 0
-    // So, expected pattern: X011 0011 (0x33) or X010 0011 (0x23) if quick stop is not active
+    // Expected pattern for Switched On: Bit 0=1, Bit 1=1, Bit 4=1, Bit 5=1
+    // Other bits should be 0 for this state.
     attempts = 0;
     do {
         if (soem_interface_read_sdo(slave_idx, 0x6041, 0x00, sizeof(statusword_val), &statusword_val) != 0) {
@@ -441,10 +445,12 @@ int soem_interface_configure_drive_modes(uint16_t slave_idx, int8_t mode_of_oper
         printf("SOEM_Interface: Slave %u Statusword: 0x%04X (Expected Switched On: 0x23)\n", slave_idx, statusword_val);
         // Check for specific bits: Ready to switch on (0), Switched on (1), Voltage enabled (4), Quick stop (5)
         // And ensure Operation enabled (2), Fault (3), Switch on disabled (6) are 0
-        if (((statusword_val & 0x47) == 0x23) && // Check bits 0,1,2,4,5,6. Expected 0x23 (0b00100011) for bits 0,1,4,5
-            !((statusword_val >> 2) & 0x01) &&    // Bit 2 (Operation enabled) is 0
-            !((statusword_val >> 3) & 0x01) &&    // Bit 3 (Fault) is 0
-            !((statusword_val >> 6) & 0x01))      // Bit 6 (Switch on disabled) is 0
+        // Simplified check: Focus on bits 0, 1, 3, 4.
+        // Expected for 0x23 (0b00100011) would be 0x23. If Quick Stop is also active (bit 5), it's 0x23 | 0x20 = 0x33.
+        if ((statusword_val & 0x01) && // Bit 0 (Ready to switch on) is 1
+            ((statusword_val >> 1) & 0x01) && // Bit 1 (Switched on) is 1
+            ((statusword_val >> 4) & 0x01) && // Bit 4 (Voltage enabled) is 1
+            !((statusword_val >> 3) & 0x01)) // Bit 3 (Fault) is 0
         {
             printf("SOEM_Interface: Slave %u is Switched On.\n", slave_idx);
             break;
@@ -477,11 +483,12 @@ int soem_interface_init(const char *ifname) {
         printf("SOEM_Interface: ec_init on %s succeeded.\n", ifname);
 
         // Find slaves
-        if (ec_config_init(FALSE) > 0) {
-            printf("SOEM_Interface: %d slaves found and configured.\n", ec_slavecount);
+        int slaves_found = ec_config_init(FALSE);
+        if (slaves_found > 0) {
+            printf("SOEM_Interface: %d slaves found and configured by SOEM.\n", ec_slavecount);
 
             if (ec_slavecount == 0) {
-                fprintf(stderr, "SOEM_Interface: No EtherCAT slaves found!\n");
+                fprintf(stderr, "SOEM_Interface: No EtherCAT slaves found after ec_config_init!\n");
                 return -1;
             }
 
@@ -492,6 +499,8 @@ int soem_interface_init(const char *ifname) {
             // This is where SOEM's auto-configuration happens.
             // We will override this later with dynamic PDO mapping.
             ec_config_map(&IOmap);
+            printf("SOEM_Interface: IOmap configured. Output bits: %d, Input bits: %d.\n", ec_group[0].Obits, ec_group[0].Ibits);
+
 
             // Print slave information
             for (i = 1; i <= ec_slavecount; i++) {
@@ -513,7 +522,7 @@ int soem_interface_init(const char *ifname) {
                     0x60710010, // 0x6071:00 Target torque (16 bits)
                     0x607A0020, // 0x607A:00 Target position (32 bits)
                     0x60FF0020, // 0x60FF:00 Target velocity (32 bits)
-                    0x60B20010, // 0x60B2:00 Torque offset (16 bits)
+                    0x60B20010, // 0x60B2:0x00 Torque offset (16 bits)
                     // Add padding if required by LAN9252 (e.g., 0x00000020 for 32-bit dummy)
                     // 0x00000020 // Example padding (Index 0x0000, Subindex 0x00, Length 32 bits)
                 };
@@ -548,6 +557,8 @@ int soem_interface_init(const char *ifname) {
 
                 // Re-map the IOmap after custom PDO configuration
                 ec_config_map(&IOmap);
+                printf("SOEM_Interface: IOmap re-configured after custom PDOs. New Output bits: %d, Input bits: %d.\n", ec_group[0].Obits, ec_group[0].Ibits);
+
 
                 // Re-calculate expected WKC
                 expectedWKC = (ec_group[0].outputsWKC * 2) + ec_group[0].inputsWKC;
@@ -617,11 +628,11 @@ int soem_interface_init(const char *ifname) {
                 return -1;
             }
         } else {
-            fprintf(stderr, "SOEM_Interface: No slaves found on %s.\n", ifname);
+            fprintf(stderr, "SOEM_Interface: No slaves found on %s after ec_config_init.\n", ifname);
             return -1;
         }
     } else {
-        fprintf(stderr, "SOEM_Interface: No EtherCAT master found on %s.\n", ifname);
+        fprintf(stderr, "SOEM_Interface: No EtherCAT master found on %s (ec_init failed).\n", ifname);
         return -1;
     }
 
