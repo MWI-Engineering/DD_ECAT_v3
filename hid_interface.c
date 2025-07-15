@@ -1,27 +1,30 @@
-// hid_interface.c - Corrected FFB Parser
+
+// hid_interface.c - Fixed version with rate limiting and error handling
 #include "hid_interface.h"
 #include <stdio.h>
 #include <pthread.h>
-#include <unistd.h>     // usleep, read, write
-#include <fcntl.h>      // open
+#include <unistd.h>
+#include <fcntl.h>
 #include <stdlib.h>
-#include <string.h>     // memset
+#include <string.h>
 #include <errno.h>
+#include <time.h>
+#include <sys/time.h>
 
 #define HID_DEVICE_PATH "/dev/hidg0"
 #define HID_REPORT_SIZE 64
+#define HID_SEND_INTERVAL_MS 8  // Send reports every 8ms (125Hz) - typical for gaming controllers
 
 static int hidg_fd = -1;
 
-#define FFB_EFFECT_QUEUE_SIZE 10
-static ffb_effect_t ffb_effect_queue[FFB_EFFECT_QUEUE_SIZE];
-static int queue_head = 0;
-static int queue_tail = 0;
-static int queue_count = 0;
-static pthread_mutex_t queue_mutex = PTHREAD_MUTEX_INITIALIZER;
-static pthread_cond_t queue_cond = PTHREAD_COND_INITIALIZER;
+// Rate limiting for gamepad reports
+static struct timespec last_send_time = {0, 0};
+static int rate_limit_enabled = 1;
 
-static int hid_running = 0;
+// Add this helper function for time comparison
+static long timespec_diff_ms(struct timespec *start, struct timespec *end) {
+    return (end->tv_sec - start->tv_sec) * 1000 + (end->tv_nsec - start->tv_nsec) / 1000000;
+}
 static pthread_t ffb_reception_thread;
 
 // FFB Report structures matching your HID descriptor
@@ -367,6 +370,20 @@ int hid_interface_get_ffb_effect(ffb_effect_t *effect_out) {
 void hid_interface_send_gamepad_report(float position, unsigned int buttons) {
     if (hidg_fd < 0) return;
 
+    // Rate limiting: only send reports every HID_SEND_INTERVAL_MS milliseconds
+    if (rate_limit_enabled) {
+        struct timespec current_time;
+        clock_gettime(CLOCK_MONOTONIC, &current_time);
+        
+        if (last_send_time.tv_sec != 0 || last_send_time.tv_nsec != 0) {
+            long elapsed_ms = timespec_diff_ms(&last_send_time, &current_time);
+            if (elapsed_ms < HID_SEND_INTERVAL_MS) {
+                return; // Skip this report to avoid overwhelming the HID device
+            }
+        }
+        last_send_time = current_time;
+    }
+
     uint8_t report[HID_REPORT_SIZE] = {0};
 
     // Format matching your HID descriptor:
@@ -381,8 +398,53 @@ void hid_interface_send_gamepad_report(float position, unsigned int buttons) {
 
     ssize_t bytes_written = write(hidg_fd, report, HID_REPORT_SIZE);
     if (bytes_written < 0) {
-        perror("HIDInterface: Failed to send gamepad report");
+        if (errno == EAGAIN || errno == EWOULDBLOCK) {
+            // Device buffer is full, this is normal - just skip this report
+            // Don't spam the console with these errors
+            static int eagain_count = 0;
+            if (++eagain_count % 100 == 0) {
+                printf("HIDInterface: Device buffer full (%d times), skipping reports\n", eagain_count);
+            }
+        } else {
+            // Other errors are more serious
+            perror("HIDInterface: Failed to send gamepad report");
+        }
     }
-    // Remove the debug print to avoid spam
-    // printf("HIDInterface: Sent gamepad report (%zd bytes)\n", bytes_written);
+}
+
+/**
+ * @brief Enable or disable rate limiting for gamepad reports
+ * @param enable 1 to enable rate limiting, 0 to disable
+ */
+void hid_interface_set_rate_limiting(int enable) {
+    rate_limit_enabled = enable;
+    if (!enable) {
+        // Reset the last send time when disabling rate limiting
+        last_send_time.tv_sec = 0;
+        last_send_time.tv_nsec = 0;
+    }
+}
+
+/**
+ * @brief Alternative: Use blocking I/O for more reliable transmission
+ * Call this after hid_interface_init() if you want blocking writes
+ */
+int hid_interface_set_blocking_mode() {
+    if (hidg_fd < 0) return -1;
+    
+    int flags = fcntl(hidg_fd, F_GETFL);
+    if (flags == -1) {
+        perror("HIDInterface: Failed to get file flags");
+        return -1;
+    }
+    
+    // Remove O_NONBLOCK flag to make writes blocking
+    flags &= ~O_NONBLOCK;
+    if (fcntl(hidg_fd, F_SETFL, flags) == -1) {
+        perror("HIDInterface: Failed to set blocking mode");
+        return -1;
+    }
+    
+    printf("HIDInterface: Switched to blocking mode\n");
+    return 0;
 }
