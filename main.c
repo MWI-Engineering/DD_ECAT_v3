@@ -92,7 +92,7 @@ int main(int argc, char *argv[]) {
     if (soem_interface_init(ethercat_ifname) != 0) {
         fprintf(stderr, "Failed to initialize EtherCAT master. Exiting.\n");
         soem_interface_stop_master();
-        hid_interface_stop();
+        //hid_interface_stop();
         return EXIT_FAILURE;
     }
 
