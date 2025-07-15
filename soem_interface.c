@@ -492,22 +492,29 @@ int soem_interface_init(const char *ifname) {
                 return -1;
             }
 
+            // Print initial slave states
+            for (i = 1; i <= ec_slavecount; i++) {
+                printf("SOEM_Interface: Slave %d: Initial State=%d\n", i, ec_slave[i].state);
+            }
+
             // Go to Pre-Operational state for all slaves before attempting SDO configuration
             printf("SOEM_Interface: Requesting Pre-Operational state for all slaves...\n");
             // Increased timeout for initial PRE_OP transition
-            ec_statecheck(0, EC_STATE_PRE_OP, EC_TIMEOUTSTATE * 5);
+            ec_statecheck(0, EC_STATE_PRE_OP, EC_TIMEOUTSTATE * 10); // Increased timeout significantly
 
             // Check if all slaves are in Pre-Operational
             int all_slaves_pre_op = 1;
             for (i = 1; i <= ec_slavecount; i++) {
                 if (ec_slave[i].state != EC_STATE_PRE_OP) {
-                    printf("SOEM_Interface: Slave %d not in Pre-Operational state. Current state: %d\n", i, ec_slave[i].state);
+                    printf("SOEM_Interface: Slave %d not in Pre-Operational state. Current state: %d. Expected: %d\n",
+                           i, ec_slave[i].state, EC_STATE_PRE_OP);
                     all_slaves_pre_op = 0;
                 }
             }
 
             if (!all_slaves_pre_op) {
                 fprintf(stderr, "SOEM_Interface: Not all slaves reached Pre-Operational state. Cannot proceed with SDO configuration.\n");
+                fprintf(stderr, "SOEM_Interface: Please check physical EtherCAT connections, drive power, and network interface ('%s').\n", ifname);
                 return -1;
             }
             printf("SOEM_Interface: All slaves are in Pre-Operational state.\n");
