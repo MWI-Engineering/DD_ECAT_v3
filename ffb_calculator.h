@@ -1,4 +1,3 @@
-/ ffb_calculator.h - Updated to use shared types
 #ifndef FFB_CALCULATOR_H
 #define FFB_CALCULATOR_H
 
@@ -10,8 +9,6 @@ void ffb_calculator_update(float position, float velocity, float acceleration);
 void ffb_calculator_process_effect(const ffb_effect_t *effect);
 float ffb_calculator_get_torque(void);
 void ffb_calculator_set_gains(float spring_gain, float damper_gain, float inertia_gain);
-
-#endif // FFB_CALCULATOR_H
 
 /**
  * @brief Initializes the FFB calculator.
