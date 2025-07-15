@@ -110,21 +110,6 @@ void *ecat_loop(void *ptr) {
 
     printf("SOEM_Interface: Entering EtherCAT cyclic loop.\n");
 
-    /*
-    // If statusword indicates a fault (e.g., bit 3 set)
-    uint16_t error_register_val;
-    if (soem_interface_read_sdo(slave_idx, 0x603F, 0x00, sizeof(error_register_val), &error_register_val) == 0) {
-        printf("SOEM_Interface: Error Register (0x603F:00): 0x%04X\n", error_register_val);
-    // Decode error_register_val based on CiA 402 or Synapticon specific definitions
-    }
-
-    uint32_t error_history_entry; // Typically 0x1003:01 is the last error
-    if (soem_interface_read_sdo(slave_idx, 0x1003, 0x01, sizeof(error_history_entry), &error_history_entry) == 0) {
-        printf("SOEM_Interface: Last Error Code (0x1003:01): 0x%08X\n", error_history_entry);
-    // The top 16 bits are the error code, lower 16 bits might be additional info
-    }
-    */
-
     while (ecat_thread_running) {
         // Send process data
         pthread_mutex_lock(&pdo_mutex);
