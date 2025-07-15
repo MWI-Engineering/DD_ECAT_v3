@@ -66,6 +66,13 @@ static float target_torque_f = 0.0f;
 static float current_position_f = 0.0f;
 static float current_velocity_f = 0.0f;
 
+// --- Helper function to check if slave is in operational state ---
+int is_slave_operational(int slave_idx) {
+    // Check if slave is in operational state (bit 3 set)
+    // State 18 (0x12) = EC_STATE_OPERATIONAL (8) + EC_STATE_ACK (16)
+    return (ec_slave[slave_idx].state & EC_STATE_OPERATIONAL) == EC_STATE_OPERATIONAL;
+}
+
 // --- SOEM Thread Function ---
 void *ecat_loop(void *ptr) {
     int slave_idx = 1; // Assuming slave 1 is the Synapticon device
@@ -111,8 +118,8 @@ void *ecat_loop(void *ptr) {
             // printf("SOEM_Interface: WKC mismatch: %d/%d\n", wkc, expectedWKC);
         }
 
-        // Check slave state - use bitwise check for operational state
-        if ((ec_slave[slave_idx].state & EC_STATE_OPERATIONAL) != EC_STATE_OPERATIONAL) {
+        // Check slave state - use helper function
+        if (!is_slave_operational(slave_idx)) {
             // printf("SOEM_Interface: Slave %d not in OP state, current state: %d\n", slave_idx, ec_slave[slave_idx].state);
             ec_statecheck(slave_idx, EC_STATE_OPERATIONAL, EC_TIMEOUTSTATE);
         }
@@ -359,14 +366,14 @@ int soem_interface_init(const char *ifname) {
                 // Ensure these offsets match the configured PDOs
                 if (ec_slave[slave_idx].outputs > 0) {
                     somanet_outputs = (somanet_rx_pdo_t *)(ec_slave[slave_idx].outputs);
-                    printf("SOEM_Interface: somanet_outputs mapped at 0x%p\n", (void*)somanet_outputs);
+                    printf("SOEM_Interface: somanet_outputs mapped at %p\n", (void*)somanet_outputs);
                 } else {
                     fprintf(stderr, "SOEM_Interface: No output PDOs found for slave %d.\n", slave_idx);
                     return -1;
                 }
                 if (ec_slave[slave_idx].inputs > 0) {
                     somanet_inputs = (somanet_tx_pdo_t *)(ec_slave[slave_idx].inputs);
-                    printf("SOEM_Interface: somanet_inputs mapped at 0x%p\n", (void*)somanet_inputs);
+                    printf("SOEM_Interface: somanet_inputs mapped at %p\n", (void*)somanet_inputs);
                 } else {
                     fprintf(stderr, "SOEM_Interface: No input PDOs found for slave %d.\n", slave_idx);
                     return -1;
@@ -381,8 +388,16 @@ int soem_interface_init(const char *ifname) {
             printf("SOEM_Interface: Requesting Operational state for all slaves...\n");
             ec_statecheck(0, EC_STATE_OPERATIONAL, EC_TIMEOUTSTATE * 3); // Wait longer for all slaves
 
-            // Use bitwise check for operational state
-            if ((ec_slave[0].state & EC_STATE_OPERATIONAL) == EC_STATE_OPERATIONAL) {
+            // Check if all slaves are operational
+            int all_slaves_operational = 1;
+            for (i = 1; i <= ec_slavecount; i++) {
+                if (!is_slave_operational(i)) {
+                    printf("SOEM_Interface: Slave %d not operational. Current state: %d\n", i, ec_slave[i].state);
+                    all_slaves_operational = 0;
+                }
+            }
+
+            if (all_slaves_operational) {
                 printf("SOEM_Interface: All slaves are in Operational state.\n");
                 master_initialized = 1;
                 ecat_thread_running = 1;
@@ -394,9 +409,10 @@ int soem_interface_init(const char *ifname) {
                     return -1;
                 }
             } else {
-                fprintf(stderr, "SOEM_Interface: Not all slaves reached Operational state. Current state: %d\n", ec_slave[0].state);
+                fprintf(stderr, "SOEM_Interface: Not all slaves reached Operational state.\n");
                 for (i = 1; i <= ec_slavecount; i++) {
-                    printf("SOEM_Interface: Slave %d: Current State=%d\n", i, ec_slave[i].state);
+                    printf("SOEM_Interface: Slave %d: Current State=%d (Operational=%s)\n", 
+                           i, ec_slave[i].state, is_slave_operational(i) ? "YES" : "NO");
                 }
                 return -1;
             }
