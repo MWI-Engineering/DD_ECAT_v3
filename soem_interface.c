@@ -38,14 +38,14 @@ typedef struct PACKED
 
 typedef struct PACKED
 {
-    uint16 statusword;          // 0x6041:0x00
-    int8   modes_of_operation_display; // 0x6061:0x00
-    int32  position_actual_value; // 0x6064:0x00
-    int32  velocity_actual_value; // 0x6069:0x00
-    int16  torque_actual_value;   // 0x6077:0x00
-    int16  current_actual_value;  // 0x6078:0x00
-    uint32 physical_inputs;     // 0x60FD:0x01
-    uint32 tuning_status;       // 0x2702:0x00
+    uint16 statusword;                  // 0x6041:0x00
+    int8   modes_of_operation_display;  // 0x6061:0x00
+    int32  position_actual_value;       // 0x6064:0x00
+    int32  velocity_actual_value;       // 0x6069:0x00
+    int16  torque_actual_value;         // 0x6077:0x00
+    int16  current_actual_value;        // 0x6078:0x00
+    uint32 physical_inputs;             // 0x60FD:0x01
+    uint32 tuning_status;               // 0x2702:0x00
 } somanet_tx_pdo_t;
 
 // Pointers to the PDO data in the IOmap
