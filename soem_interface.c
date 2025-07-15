@@ -327,6 +327,37 @@ int soem_interface_configure_drive_modes(uint16_t slave_idx, int8_t mode_of_oper
 
     printf("SOEM_Interface: Configuring drive modes for slave %u...\n", slave_idx);
 
+    // --- Add Fault Reset ---
+    // This is crucial if the drive is in a fault state from a previous run or power cycle.
+    controlword_val = 0x80; // Fault Reset
+    printf("SOEM_Interface: Setting Controlword (0x6040:00) to 0x%04X (Fault Reset)...\n", controlword_val);
+    if (soem_interface_write_sdo(slave_idx, 0x6040, 0x00, sizeof(controlword_val), &controlword_val) != 0) {
+        fprintf(stderr, "SOEM_Interface: Failed to send Fault Reset command.\n");
+        return -1;
+    }
+    usleep(20000); // Give drive time to process fault reset (20ms)
+
+    // Poll Statusword to ensure fault is cleared (bit 3 should be 0)
+    attempts = 0;
+    do {
+        if (soem_interface_read_sdo(slave_idx, 0x6041, 0x00, sizeof(statusword_val), &statusword_val) != 0) {
+            fprintf(stderr, "SOEM_Interface: Failed to read Statusword after Fault Reset.\n");
+            return -1;
+        }
+        printf("SOEM_Interface: Slave %u Statusword: 0x%04X (Fault bit: %d)\n", slave_idx, statusword_val, (statusword_val >> 3) & 0x01);
+        if (!((statusword_val >> 3) & 0x01)) { // Check if Fault bit (bit 3) is 0
+            printf("SOEM_Interface: Slave %u Fault cleared.\n", slave_idx);
+            break;
+        }
+        usleep(10000); // Wait 10ms before retrying
+        attempts++;
+    } while (attempts < max_attempts);
+
+    if (attempts >= max_attempts) {
+        fprintf(stderr, "SOEM_Interface: Slave %u failed to clear fault (Statusword: 0x%04X).\n", slave_idx, statusword_val);
+        return -1;
+    }
+
     // 1. Set Modes of Operation (0x6060:00)
     printf("SOEM_Interface: Setting Modes of Operation (0x6060:00) to %d...\n", mode_of_operation);
     if (soem_interface_write_sdo(slave_idx, 0x6060, 0x00, sizeof(mode_of_operation), &mode_of_operation) != 0) {
@@ -345,7 +376,16 @@ int soem_interface_configure_drive_modes(uint16_t slave_idx, int8_t mode_of_oper
     usleep(10000); // Give drive time to process
 
     // Poll Statusword until "Ready to Switch On" (0x21)
-    // Bits: Ready to switch on (0), Voltage enabled (4)
+    // CiA 402 Statusword bits for "Ready to Switch On":
+    // Bit 0 (Ready to switch on) = 1
+    // Bit 1 (Switched on) = 0
+    // Bit 2 (Operation enabled) = 0
+    // Bit 3 (Fault) = 0
+    // Bit 4 (Voltage enabled) = 1
+    // Bit 5 (Quick stop) = 1 (usually active by default)
+    // Bit 6 (Switch on disabled) = 0
+    // So, expected pattern: X011 0001 (0x31) or X010 0001 (0x21) if quick stop is not active
+    // We'll check for 0x21 (0b00100001) which means Ready to Switch On (bit 0) and Voltage Enabled (bit 4) and Quick Stop (bit 5) are active.
     attempts = 0;
     do {
         if (soem_interface_read_sdo(slave_idx, 0x6041, 0x00, sizeof(statusword_val), &statusword_val) != 0) {
@@ -353,7 +393,14 @@ int soem_interface_configure_drive_modes(uint16_t slave_idx, int8_t mode_of_oper
             return -1;
         }
         printf("SOEM_Interface: Slave %u Statusword: 0x%04X (Expected Ready to Switch On: 0x21)\n", slave_idx, statusword_val);
-        if ((statusword_val & 0x4F) == 0x21) { // Check for Ready to Switch On (0x01) and Voltage Enabled (0x10)
+        // Check for specific bits: Ready to switch on (0), Voltage enabled (4), Quick stop (5)
+        // And ensure Switched on (1), Operation enabled (2), Fault (3), Switch on disabled (6) are 0
+        if (((statusword_val & 0x47) == 0x21) && // Check bits 0,1,2,4,5,6. Expected 0x21 (0b00100001) for bits 0,4,5
+            !((statusword_val >> 1) & 0x01) &&    // Bit 1 (Switched on) is 0
+            !((statusword_val >> 2) & 0x01) &&    // Bit 2 (Operation enabled) is 0
+            !((statusword_val >> 3) & 0x01) &&    // Bit 3 (Fault) is 0
+            !((statusword_val >> 6) & 0x01))      // Bit 6 (Switch on disabled) is 0
+        {
             printf("SOEM_Interface: Slave %u is Ready to Switch On.\n", slave_idx);
             break;
         }
@@ -376,7 +423,15 @@ int soem_interface_configure_drive_modes(uint16_t slave_idx, int8_t mode_of_oper
     usleep(10000); // Give drive time to process
 
     // Poll Statusword until "Switched On" (0x23)
-    // Bits: Ready to switch on (0), Switched on (1), Voltage enabled (4)
+    // CiA 402 Statusword bits for "Switched On":
+    // Bit 0 (Ready to switch on) = 1
+    // Bit 1 (Switched on) = 1
+    // Bit 2 (Operation enabled) = 0
+    // Bit 3 (Fault) = 0
+    // Bit 4 (Voltage enabled) = 1
+    // Bit 5 (Quick stop) = 1 (usually active by default)
+    // Bit 6 (Switch on disabled) = 0
+    // So, expected pattern: X011 0011 (0x33) or X010 0011 (0x23) if quick stop is not active
     attempts = 0;
     do {
         if (soem_interface_read_sdo(slave_idx, 0x6041, 0x00, sizeof(statusword_val), &statusword_val) != 0) {
@@ -384,7 +439,13 @@ int soem_interface_configure_drive_modes(uint16_t slave_idx, int8_t mode_of_oper
             return -1;
         }
         printf("SOEM_Interface: Slave %u Statusword: 0x%04X (Expected Switched On: 0x23)\n", slave_idx, statusword_val);
-        if ((statusword_val & 0x4F) == 0x23) { // Check for Ready to Switch On (0x01), Switched On (0x02), Voltage Enabled (0x10)
+        // Check for specific bits: Ready to switch on (0), Switched on (1), Voltage enabled (4), Quick stop (5)
+        // And ensure Operation enabled (2), Fault (3), Switch on disabled (6) are 0
+        if (((statusword_val & 0x47) == 0x23) && // Check bits 0,1,2,4,5,6. Expected 0x23 (0b00100011) for bits 0,1,4,5
+            !((statusword_val >> 2) & 0x01) &&    // Bit 2 (Operation enabled) is 0
+            !((statusword_val >> 3) & 0x01) &&    // Bit 3 (Fault) is 0
+            !((statusword_val >> 6) & 0x01))      // Bit 6 (Switch on disabled) is 0
+        {
             printf("SOEM_Interface: Slave %u is Switched On.\n", slave_idx);
             break;
         }
