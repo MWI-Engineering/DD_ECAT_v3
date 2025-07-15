@@ -1,14 +1,11 @@
 // ffb_calculator.c
-// #define _USE_MATH_DEFINES  // For Windows compatibility
-// #define _GNU_SOURCE        // For GNU/Linux systems including Raspberry Pi
 #include "ffb_calculator.h"
 #include <stdio.h> // For printf (for debugging)
 #include <math.h>  // For fmax, fmin, sin, cos
 #include <stdint.h>
 #include <sys/time.h> // For gettimeofday
 
-//If _GNU_SOURCE fails on the raspberry pi use this
- 
+// Define pi value 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
 #endif
