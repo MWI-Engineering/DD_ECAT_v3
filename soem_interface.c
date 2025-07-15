@@ -167,16 +167,31 @@ int soem_interface_write_sdo(uint16_t slave_idx, uint16_t index, uint8_t subinde
 // @param slave_idx The index of the slave (1-based).
 // @param index The 16-bit object dictionary index.
 // @param subindex The 8-bit object dictionary subindex.
-// @param data_size The size of the data to read in bytes.
-// @param data Pointer to the buffer to store the read data.
+// @param expected_data_size The expected size of the data to read in bytes.
+// @param out_data_buffer Pointer to the buffer to store the read data.
 // @return 0 on success, -1 on failure.
-int soem_interface_read_sdo(uint16_t slave_idx, uint16_t index, uint8_t subindex, uint16_t data_size, void *data) {
+int soem_interface_read_sdo(uint16_t slave_idx, uint16_t index, uint8_t subindex, uint16_t expected_data_size, void *out_data_buffer) {
     int wkc_sdo;
-    wkc_sdo = ec_SDOread(slave_idx, index, subindex, FALSE, data_size, &data, EC_TIMEOUTRXM);
+    int actual_size = expected_data_size; // 'actual_size' will hold the size read by SOEM
+    void *temp_buffer_ptr = out_data_buffer; // A temporary void* that points to the user's buffer
+
+    // Call ec_SDOread.
+    // For p_size: Pass the address of 'actual_size' (which is an int).
+    // For p_data: Pass the address of 'temp_buffer_ptr' (which is a void*).
+    // The ec_SDOread function will then write the data into the memory pointed to by *temp_buffer_ptr.
+    wkc_sdo = ec_SDOread(slave_idx, index, subindex, FALSE, &actual_size, &temp_buffer_ptr, EC_TIMEOUTRXM);
+
     if (wkc_sdo == 0) {
         fprintf(stderr, "SOEM_Interface: SDO read failed for slave %u, index 0x%04X:%02X\n", slave_idx, index, subindex);
         return -1;
     }
+
+    // Optional: Verify if the actual size read matches the expected size.
+    if (actual_size != expected_data_size) {
+        fprintf(stderr, "SOEM_Interface: SDO read size mismatch for slave %u, index 0x%04X:%02X. Expected %u bytes, got %d bytes.\n",
+                slave_idx, index, subindex, expected_data_size, actual_size);
+    }
+
     return 0;
 }
 
@@ -456,8 +471,8 @@ int soem_interface_init(const char *ifname) {
                     0x60610008, // 0x6061:00 Modes of operation display (8 bits)
                     0x60640020, // 0x6064:00 Position actual value (32 bits)
                     0x60690020, // 0x6069:00 Velocity actual value (32 bits)
-                    0x60770010, // 0x6077:00 Torque actual value (16 bits)
-                    0x60780010, // 0x6078:00 Current actual value (16 bits)
+                    0x60770010, // 0x6077:0x00 Torque actual value (16 bits)
+                    0x60780010, // 0x6078:0x00 Current actual value (16 bits)
                     // Add padding if required by LAN9252
                     // 0x00000020 // Example padding
                 };
