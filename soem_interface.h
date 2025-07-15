@@ -16,7 +16,7 @@ extern "C" {
  * @param ifname The network interface name (e.g., "eth0").
  * @return 0 on success, -1 on failure.
  */
-int soem_interface_init_master(const char *ifname);
+int soem_interface_init(const char *ifname);
 
 /**
  * @brief Sends target torque to the EtherCAT thread.

@@ -11,6 +11,10 @@
 #include "ethercat.h"
 #include "ethercattype.h"
 
+#ifndef PACKED
+#define PACKED __attribute__((__packed__))
+#endif
+
 // --- SOEM Global Variables ---
 char IOmap[4096];
 ec_ODlistt ODlist;
