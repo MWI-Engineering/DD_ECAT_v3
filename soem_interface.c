@@ -499,7 +499,8 @@ int soem_interface_init(const char *ifname) {
             // This is where SOEM's auto-configuration happens.
             // We will override this later with dynamic PDO mapping.
             ec_config_map(&IOmap);
-            printf("SOEM_Interface: IOmap configured. Output bits: %d, Input bits: %d.\n", ec_group[0].Obits, ec_group[0].Ibits);
+            // Corrected: Use Obytes and Ibytes instead of Obits and Ibits
+            printf("SOEM_Interface: IOmap configured. Output bytes: %d, Input bytes: %d.\n", ec_group[0].Obytes, ec_group[0].Ibytes);
 
 
             // Print slave information
@@ -521,7 +522,7 @@ int soem_interface_init(const char *ifname) {
                     0x60600008, // 0x6060:00 Modes of operation (8 bits)
                     0x60710010, // 0x6071:00 Target torque (16 bits)
                     0x607A0020, // 0x607A:00 Target position (32 bits)
-                    0x60FF0020, // 0x60FF:00 Target velocity (32 bits)
+                    0x60FF0020, // 0x60FF:0x00 Target velocity (32 bits)
                     0x60B20010, // 0x60B2:0x00 Torque offset (16 bits)
                     // Add padding if required by LAN9252 (e.g., 0x00000020 for 32-bit dummy)
                     // 0x00000020 // Example padding (Index 0x0000, Subindex 0x00, Length 32 bits)
@@ -557,7 +558,8 @@ int soem_interface_init(const char *ifname) {
 
                 // Re-map the IOmap after custom PDO configuration
                 ec_config_map(&IOmap);
-                printf("SOEM_Interface: IOmap re-configured after custom PDOs. New Output bits: %d, Input bits: %d.\n", ec_group[0].Obits, ec_group[0].Ibits);
+                // Corrected: Use Obytes and Ibytes instead of Obits and Ibits
+                printf("SOEM_Interface: IOmap re-configured after custom PDOs. New Output bytes: %d, Input bytes: %d.\n", ec_group[0].Obytes, ec_group[0].Ibytes);
 
 
                 // Re-calculate expected WKC
