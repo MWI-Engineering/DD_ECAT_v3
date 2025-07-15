@@ -9,7 +9,7 @@ CC = gcc
 #   -std=c11: Use C11 standard [cite: 1]
 #   -O2: Optimization level 2 (you can adjust this, e.g., -O0 for no optimization during debugging) [cite: 1]
 #   -I/home/mwi/SOEM/install/include/soem: Add this line for SOEM headers
-CFLAGS = -Wall -Wextra -g -std=c11 -O2 -I/home/mwi/SOEM/install/include/soem
+CFLAGS = -Wall -Wextra -g -std=c11 -O2 -D_GNU_SOURCE -I/home/mwi/SOEM/install/include/soem
 
 # LDFLAGS: Linker flags - specify libraries [cite: 2]
 #   -lrt: Real-time extensions library (for clock_gettime) [cite: 2]
