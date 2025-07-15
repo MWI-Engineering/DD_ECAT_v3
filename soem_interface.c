@@ -313,7 +313,7 @@ int soem_interface_init(const char *ifname) {
             if (ec_slavecount >= slave_idx) {
                 printf("SOEM_Interface: Mapping PDOs for Synapticon slave (index %d)...\n", slave_idx);
 
-                // --- Example: Define custom RxPDO mapping for Synapticon ACTILINK-S ---
+                // Define custom RxPDO mapping for Synapticon ACTILINK-S ---
                 // Objects are (Index << 16 | Subindex << 8 | LengthInBits)
                 // Example objects (adjust based on your exact needs and device object dictionary)
                 uint32_t custom_rx_mapped_objects[] = {
@@ -335,7 +335,7 @@ int soem_interface_init(const char *ifname) {
                 }
                 printf("SOEM_Interface: RxPDO mapping configured.\n");
 
-                // --- Example: Define custom TxPDO mapping for Synapticon ACTILINK-S ---
+                // Define custom TxPDO mapping for Synapticon ACTILINK-S ---
                 uint32_t custom_tx_mapped_objects[] = {
                     0x60410010, // 0x6041:00 Statusword (16 bits)
                     0x60610008, // 0x6061:00 Modes of operation display (8 bits)
