@@ -1,6 +1,6 @@
-
 // hid_interface.c - Fixed version with rate limiting and error handling
 #include "hid_interface.h"
+#include "ffb_types.h"
 #include <stdio.h>
 #include <pthread.h>
 #include <unistd.h>
