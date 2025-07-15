@@ -42,7 +42,6 @@ unsigned int read_button_states() {
     // - Read from an I2C/SPI button controller
     // - Read from another HID device
     // - etc.
-    
     // For now, return 0 (no buttons pressed)
     return 0;
 }
