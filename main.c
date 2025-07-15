@@ -11,7 +11,7 @@
 #include "hid_interface.h"
 #include "ffb_calculator.h"
 #include "soem_interface.h"
-#include "ff_types.h"
+#include "ffb_types.h"
 
 // Global flag for graceful shutdown
 static volatile int running = 1;
