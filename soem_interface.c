@@ -182,7 +182,7 @@ int soem_interface_read_sdo(uint16_t slave_idx, uint16_t index, uint8_t subindex
     wkc_sdo = ec_SDOread(slave_idx, index, subindex, FALSE, &actual_size, &temp_buffer_ptr, EC_TIMEOUTRXM);
 
     if (wkc_sdo == 0) {
-        fprintf(stderr, "SOEM_Interface: SDO read failed for slave %u, index 0x%04X:%02X\n", slave_idx, index, subindex);
+        fprintf(stderr, "SOEM_Interface: SDO read failed for slave %u, index 0x%04X:%02X. WKC: %d\n", slave_idx, index, subindex, wkc_sdo);
         return -1;
     }
 
@@ -491,6 +491,27 @@ int soem_interface_init(const char *ifname) {
                 fprintf(stderr, "SOEM_Interface: No EtherCAT slaves found after ec_config_init!\n");
                 return -1;
             }
+
+            // Go to Pre-Operational state for all slaves before attempting SDO configuration
+            printf("SOEM_Interface: Requesting Pre-Operational state for all slaves...\n");
+            // Increased timeout for initial PRE_OP transition
+            ec_statecheck(0, EC_STATE_PRE_OP, EC_TIMEOUTSTATE * 5);
+
+            // Check if all slaves are in Pre-Operational
+            int all_slaves_pre_op = 1;
+            for (i = 1; i <= ec_slavecount; i++) {
+                if (ec_slave[i].state != EC_STATE_PRE_OP) {
+                    printf("SOEM_Interface: Slave %d not in Pre-Operational state. Current state: %d\n", i, ec_slave[i].state);
+                    all_slaves_pre_op = 0;
+                }
+            }
+
+            if (!all_slaves_pre_op) {
+                fprintf(stderr, "SOEM_Interface: Not all slaves reached Pre-Operational state. Cannot proceed with SDO configuration.\n");
+                return -1;
+            }
+            printf("SOEM_Interface: All slaves are in Pre-Operational state.\n");
+
 
             // Configure distributed clocks (if supported/needed)
             ec_configdc();
