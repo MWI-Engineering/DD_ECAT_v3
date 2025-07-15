@@ -70,8 +70,6 @@ static float current_velocity_f = 0.0f;
 int is_slave_operational(int slave_idx) {
     // Check if slave is in operational state (bit 3 set)
     // State 18 (0x12) = EC_STATE_OPERATIONAL (8) + EC_STATE_ACK (16)
-    // A more robust check might involve checking for EC_STATE_OPERATIONAL only,
-    // and then verifying the statusword for drive readiness.
     return (ec_slave[slave_idx].state & EC_STATE_OPERATIONAL) == EC_STATE_OPERATIONAL;
 }
 
@@ -97,14 +95,6 @@ void *ecat_loop(void *ptr) {
         // Send process data
         pthread_mutex_lock(&pdo_mutex);
         if (somanet_outputs) {
-            // Continuously set controlword to enable operation (0x0F) if in operational state
-            // This ensures the drive remains active.
-            if (is_slave_operational(slave_idx)) {
-                somanet_outputs->controlword = 0x0F; // Enable Operation
-            } else {
-                // If not operational, you might want to set a safe controlword or try to transition
-                somanet_outputs->controlword = 0x06; // Shutdown state
-            }
             somanet_outputs->target_torque = (int16_t)(target_torque_f * 1000.0f); // Assuming torque is in mNm
             // Other outputs can be set here if needed
         }
@@ -130,9 +120,7 @@ void *ecat_loop(void *ptr) {
 
         // Check slave state - use helper function
         if (!is_slave_operational(slave_idx)) {
-             // printf("SOEM_Interface: Slave %d not in OP state, current state: %d\n", slave_idx, ec_slave[slave_idx].state);
-            // Attempt to transition to operational if not already there.
-            // This might be redundant if the main init handles it, but good for robustness.
+            // printf("SOEM_Interface: Slave %d not in OP state, current state: %d\n", slave_idx, ec_slave[slave_idx].state);
             ec_statecheck(slave_idx, EC_STATE_OPERATIONAL, EC_TIMEOUTSTATE);
         }
 
@@ -159,39 +147,6 @@ int soem_interface_write_sdo(uint16_t slave_idx, uint16_t index, uint8_t subinde
         fprintf(stderr, "SOEM_Interface: SDO write failed for slave %u, index 0x%04X:%02X\n", slave_idx, index, subindex);
         return -1;
     }
-    return 0;
-}
-
-// --- Helper function for SDO reads ---
-// This function performs an SDO read operation from a specific slave.
-// @param slave_idx The index of the slave (1-based).
-// @param index The 16-bit object dictionary index.
-// @param subindex The 8-bit object dictionary subindex.
-// @param expected_data_size The expected size of the data to read in bytes.
-// @param out_data_buffer Pointer to the buffer to store the read data.
-// @return 0 on success, -1 on failure.
-int soem_interface_read_sdo(uint16_t slave_idx, uint16_t index, uint8_t subindex, uint16_t expected_data_size, void *out_data_buffer) {
-    int wkc_sdo;
-    int actual_size = expected_data_size; // 'actual_size' will hold the size read by SOEM
-    void *temp_buffer_ptr = out_data_buffer; // A temporary void* that points to the user's buffer
-
-    // Call ec_SDOread.
-    // For p_size: Pass the address of 'actual_size' (which is an int).
-    // For p_data: Pass the address of 'temp_buffer_ptr' (which is a void*).
-    // The ec_SDOread function will then write the data into the memory pointed to by *temp_buffer_ptr.
-    wkc_sdo = ec_SDOread(slave_idx, index, subindex, FALSE, &actual_size, &temp_buffer_ptr, EC_TIMEOUTRXM);
-
-    if (wkc_sdo == 0) {
-        fprintf(stderr, "SOEM_Interface: SDO read failed for slave %u, index 0x%04X:%02X. WKC: %d\n", slave_idx, index, subindex, wkc_sdo);
-        return -1;
-    }
-
-    // Optional: Verify if the actual size read matches the expected size.
-    if (actual_size != expected_data_size) {
-        fprintf(stderr, "SOEM_Interface: SDO read size mismatch for slave %u, index 0x%04X:%02X. Expected %u bytes, got %d bytes.\n",
-                slave_idx, index, subindex, expected_data_size, actual_size);
-    }
-
     return 0;
 }
 
@@ -308,163 +263,11 @@ int soem_interface_configure_pdo_mapping(uint16_t slave_idx, uint16_t pdo_assign
 cleanup:
     // Transition back to Operational state
     printf("SOEM_Interface: Attempting to transition back to Operational state...\n");
-    // This transition will be handled by the main init function after drive configuration
-    return ret;
-}
-
-// --- Function to configure drive modes and controlword via SDOs ---
-// This function sets the Modes of Operation and Controlword to bring the drive
-// to a state where it can accept operational commands.
-// @param slave_idx The index of the slave (1-based).
-// @param mode_of_operation The desired mode of operation (e.g., 8 for CSP, 1 for PPM).
-// @return 0 on success, -1 on failure.
-int soem_interface_configure_drive_modes(uint16_t slave_idx, int8_t mode_of_operation) {
-    uint16_t controlword_val;
-    uint16_t statusword_val = 0;
-    int ret = 0;
-    int attempts = 0;
-    const int max_attempts = 100; // Max attempts for polling (10ms * 100 = 1 second)
-
-    printf("SOEM_Interface: Configuring drive modes for slave %u...\n", slave_idx);
-
-    // --- Add Fault Reset ---
-    // This is crucial if the drive is in a fault state from a previous run or power cycle.
-    controlword_val = 0x80; // Fault Reset
-    printf("SOEM_Interface: Setting Controlword (0x6040:00) to 0x%04X (Fault Reset)...\n", controlword_val);
-    if (soem_interface_write_sdo(slave_idx, 0x6040, 0x00, sizeof(controlword_val), &controlword_val) != 0) {
-        fprintf(stderr, "SOEM_Interface: Failed to send Fault Reset command.\n");
-        return -1;
+    // Check if the slave is in operational state (allowing for ACK_STATE bit)
+    if (soem_interface_set_ethercat_state(slave_idx, EC_STATE_OPERATIONAL) != 0) {
+        fprintf(stderr, "SOEM_Interface: Failed to transition back to Operational state.\n");
+        ret = -1; // Indicate failure even if PDO mapping was partially successful
     }
-    usleep(20000); // Give drive time to process fault reset (20ms)
-
-    // Poll Statusword to ensure fault is cleared (bit 3 should be 0)
-    attempts = 0;
-    do {
-        if (soem_interface_read_sdo(slave_idx, 0x6041, 0x00, sizeof(statusword_val), &statusword_val) != 0) {
-            fprintf(stderr, "SOEM_Interface: Failed to read Statusword after Fault Reset.\n");
-            return -1;
-        }
-        printf("SOEM_Interface: Slave %u Statusword: 0x%04X (Fault bit: %d)\n", slave_idx, statusword_val, (statusword_val >> 3) & 0x01);
-        if (!((statusword_val >> 3) & 0x01)) { // Check if Fault bit (bit 3) is 0
-            printf("SOEM_Interface: Slave %u Fault cleared.\n", slave_idx);
-            break;
-        }
-        usleep(10000); // Wait 10ms before retrying
-        attempts++;
-    } while (attempts < max_attempts);
-
-    if (attempts >= max_attempts) {
-        fprintf(stderr, "SOEM_Interface: Slave %u failed to clear fault (Statusword: 0x%04X).\n", slave_idx, statusword_val);
-        return -1;
-    }
-
-    // 1. Set Modes of Operation (0x6060:00)
-    printf("SOEM_Interface: Setting Modes of Operation (0x6060:00) to %d...\n", mode_of_operation);
-    if (soem_interface_write_sdo(slave_idx, 0x6060, 0x00, sizeof(mode_of_operation), &mode_of_operation) != 0) {
-        fprintf(stderr, "SOEM_Interface: Failed to set Modes of Operation.\n");
-        return -1;
-    }
-    usleep(10000); // Give drive time to process
-
-    // 2. Controlword sequence to "Shutdown" (0x06)
-    controlword_val = 0x06; // Shutdown
-    printf("SOEM_Interface: Setting Controlword (0x6040:00) to 0x%04X (Shutdown)...\n", controlword_val);
-    if (soem_interface_write_sdo(slave_idx, 0x6040, 0x00, sizeof(controlword_val), &controlword_val) != 0) {
-        fprintf(stderr, "SOEM_Interface: Failed to set Controlword to Shutdown.\n");
-        return -1;
-    }
-    usleep(20000); // Added a slightly longer delay here before first status read
-
-    // Poll Statusword until "Ready to Switch On" (0x21)
-    // CiA 402 Statusword bits for "Ready to Switch On":
-    // Bit 0 (Ready to switch on) = 1
-    // Bit 1 (Switched on) = 0
-    // Bit 2 (Operation enabled) = 0
-    // Bit 3 (Fault) = 0
-    // Bit 4 (Voltage enabled) = 1
-    // Bit 5 (Quick stop) = 1 (usually active by default)
-    // Bit 6 (Switch on disabled) = 0
-    // Expected pattern for Ready to Switch On: Bit 0 (Ready to switch on) = 1, Bit 4 (Voltage Enabled) = 1, Bit 5 (Quick Stop) = 1
-    // Other bits should be 0 for this state.
-    attempts = 0;
-    do {
-        if (soem_interface_read_sdo(slave_idx, 0x6041, 0x00, sizeof(statusword_val), &statusword_val) != 0) {
-            fprintf(stderr, "SOEM_Interface: Failed to read Statusword during Ready to Switch On check.\n");
-            return -1;
-        }
-        printf("SOEM_Interface: Slave %u Statusword: 0x%04X (Expected Ready to Switch On: 0x21)\n", slave_idx, statusword_val);
-        // Check for specific bits: Ready to switch on (0), Voltage enabled (4), Quick stop (5)
-        // And ensure Switched on (1), Operation enabled (2), Fault (3), Switch on disabled (6) are 0
-        // Simplified check: Focus on bits 0, 1, 2, 3, 4, 5, 6
-        // Expected for Ready to Switch On: Bit 0=1, Bit 1=0, Bit 2=0, Bit 3=0, Bit 4=1, Bit 5=1, Bit 6=0
-        // Mask 0x7F (bits 0-6)
-        // Expected value for 0x21 (0b00100001) would be 0x21. If Quick Stop is also active (bit 5), it's 0x21 | 0x20 = 0x31.
-        // Let's check for the *minimum* required bits for "Ready to Switch On" (bit 0 and bit 4) and ensure no fault (bit 3).
-        if ((statusword_val & 0x01) && // Bit 0 (Ready to switch on) is 1
-            ((statusword_val >> 4) & 0x01) && // Bit 4 (Voltage enabled) is 1
-            !((statusword_val >> 3) & 0x01)) // Bit 3 (Fault) is 0
-        {
-            printf("SOEM_Interface: Slave %u is Ready to Switch On.\n", slave_idx);
-            break;
-        }
-        usleep(10000); // Wait 10ms before retrying
-        attempts++;
-    } while (attempts < max_attempts);
-
-    if (attempts >= max_attempts) {
-        fprintf(stderr, "SOEM_Interface: Slave %u failed to reach Ready to Switch On state (Statusword: 0x%04X).\n", slave_idx, statusword_val);
-        return -1;
-    }
-
-    // 3. Controlword sequence to "Switch On" (0x07)
-    controlword_val = 0x07; // Switch On
-    printf("SOEM_Interface: Setting Controlword (0x6040:00) to 0x%04X (Switch On)...\n", controlword_val);
-    if (soem_interface_write_sdo(slave_idx, 0x6040, 0x00, sizeof(controlword_val), &controlword_val) != 0) {
-        fprintf(stderr, "SOEM_Interface: Failed to set Controlword to Switch On.\n");
-        return -1;
-    }
-    usleep(10000); // Give drive time to process
-
-    // Poll Statusword until "Switched On" (0x23)
-    // CiA 402 Statusword bits for "Switched On":
-    // Bit 0 (Ready to switch on) = 1
-    // Bit 1 (Switched on) = 1
-    // Bit 2 (Operation enabled) = 0
-    // Bit 3 (Fault) = 0
-    // Bit 4 (Voltage enabled) = 1
-    // Bit 5 (Quick stop) = 1 (usually active by default)
-    // Bit 6 (Switch on disabled) = 0
-    // Expected pattern for Switched On: Bit 0=1, Bit 1=1, Bit 4=1, Bit 5=1
-    // Other bits should be 0 for this state.
-    attempts = 0;
-    do {
-        if (soem_interface_read_sdo(slave_idx, 0x6041, 0x00, sizeof(statusword_val), &statusword_val) != 0) {
-            fprintf(stderr, "SOEM_Interface: Failed to read Statusword during Switch On check.\n");
-            return -1;
-        }
-        printf("SOEM_Interface: Slave %u Statusword: 0x%04X (Expected Switched On: 0x23)\n", slave_idx, statusword_val);
-        // Check for specific bits: Ready to switch on (0), Switched on (1), Voltage enabled (4), Quick stop (5)
-        // And ensure Operation enabled (2), Fault (3), Switch on disabled (6) are 0
-        // Simplified check: Focus on bits 0, 1, 3, 4.
-        // Expected for 0x23 (0b00100011) would be 0x23. If Quick Stop is also active (bit 5), it's 0x23 | 0x20 = 0x33.
-        if ((statusword_val & 0x01) && // Bit 0 (Ready to switch on) is 1
-            ((statusword_val >> 1) & 0x01) && // Bit 1 (Switched on) is 1
-            ((statusword_val >> 4) & 0x01) && // Bit 4 (Voltage enabled) is 1
-            !((statusword_val >> 3) & 0x01)) // Bit 3 (Fault) is 0
-        {
-            printf("SOEM_Interface: Slave %u is Switched On.\n", slave_idx);
-            break;
-        }
-        usleep(10000); // Wait 10ms before retrying
-        attempts++;
-    } while (attempts < max_attempts);
-
-    if (attempts >= max_attempts) {
-        fprintf(stderr, "SOEM_Interface: Slave %u failed to reach Switched On state (Statusword: 0x%04X).\n", slave_idx, statusword_val);
-        return -1;
-    }
-
-    printf("SOEM_Interface: Drive modes configured for slave %u.\n", slave_idx);
     return ret;
 }
 
@@ -483,42 +286,13 @@ int soem_interface_init(const char *ifname) {
         printf("SOEM_Interface: ec_init on %s succeeded.\n", ifname);
 
         // Find slaves
-        int slaves_found = ec_config_init(FALSE);
-        if (slaves_found > 0) {
-            printf("SOEM_Interface: %d slaves found and configured by SOEM.\n", ec_slavecount);
+        if (ec_config_init(FALSE) > 0) {
+            printf("SOEM_Interface: %d slaves found and configured.\n", ec_slavecount);
 
             if (ec_slavecount == 0) {
-                fprintf(stderr, "SOEM_Interface: No EtherCAT slaves found after ec_config_init!\n");
+                fprintf(stderr, "SOEM_Interface: No EtherCAT slaves found!\n");
                 return -1;
             }
-
-            // Print initial slave states
-            for (i = 1; i <= ec_slavecount; i++) {
-                printf("SOEM_Interface: Slave %d: Initial State=%d\n", i, ec_slave[i].state);
-            }
-
-            // Go to Pre-Operational state for all slaves before attempting SDO configuration
-            printf("SOEM_Interface: Requesting Pre-Operational state for all slaves...\n");
-            // Increased timeout for initial PRE_OP transition
-            ec_statecheck(0, EC_STATE_PRE_OP, EC_TIMEOUTSTATE * 10); // Increased timeout significantly
-
-            // Check if all slaves are in Pre-Operational
-            int all_slaves_pre_op = 1;
-            for (i = 1; i <= ec_slavecount; i++) {
-                if (ec_slave[i].state != EC_STATE_PRE_OP) {
-                    printf("SOEM_Interface: Slave %d not in Pre-Operational state. Current state: %d. Expected: %d\n",
-                           i, ec_slave[i].state, EC_STATE_PRE_OP);
-                    all_slaves_pre_op = 0;
-                }
-            }
-
-            if (!all_slaves_pre_op) {
-                fprintf(stderr, "SOEM_Interface: Not all slaves reached Pre-Operational state. Cannot proceed with SDO configuration.\n");
-                fprintf(stderr, "SOEM_Interface: Please check physical EtherCAT connections, drive power, and network interface ('%s').\n", ifname);
-                return -1;
-            }
-            printf("SOEM_Interface: All slaves are in Pre-Operational state.\n");
-
 
             // Configure distributed clocks (if supported/needed)
             ec_configdc();
@@ -527,9 +301,6 @@ int soem_interface_init(const char *ifname) {
             // This is where SOEM's auto-configuration happens.
             // We will override this later with dynamic PDO mapping.
             ec_config_map(&IOmap);
-            // Corrected: Use Obytes and Ibytes instead of Obits and Ibits
-            printf("SOEM_Interface: IOmap configured. Output bytes: %d, Input bytes: %d.\n", ec_group[0].Obytes, ec_group[0].Ibytes);
-
 
             // Print slave information
             for (i = 1; i <= ec_slavecount; i++) {
@@ -550,8 +321,8 @@ int soem_interface_init(const char *ifname) {
                     0x60600008, // 0x6060:00 Modes of operation (8 bits)
                     0x60710010, // 0x6071:00 Target torque (16 bits)
                     0x607A0020, // 0x607A:00 Target position (32 bits)
-                    0x60FF0020, // 0x60FF:0x00 Target velocity (32 bits)
-                    0x60B20010, // 0x60B2:0x00 Torque offset (16 bits)
+                    0x60FF0020, // 0x60FF:00 Target velocity (32 bits)
+                    0x60B20010, // 0x60B2:00 Torque offset (16 bits)
                     // Add padding if required by LAN9252 (e.g., 0x00000020 for 32-bit dummy)
                     // 0x00000020 // Example padding (Index 0x0000, Subindex 0x00, Length 32 bits)
                 };
@@ -570,8 +341,8 @@ int soem_interface_init(const char *ifname) {
                     0x60610008, // 0x6061:00 Modes of operation display (8 bits)
                     0x60640020, // 0x6064:00 Position actual value (32 bits)
                     0x60690020, // 0x6069:00 Velocity actual value (32 bits)
-                    0x60770010, // 0x6077:0x00 Torque actual value (16 bits)
-                    0x60780010, // 0x6078:0x00 Current actual value (16 bits)
+                    0x60770010, // 0x6077:00 Torque actual value (16 bits)
+                    0x60780010, // 0x6078:00 Current actual value (16 bits)
                     // Add padding if required by LAN9252
                     // 0x00000020 // Example padding
                 };
@@ -586,9 +357,6 @@ int soem_interface_init(const char *ifname) {
 
                 // Re-map the IOmap after custom PDO configuration
                 ec_config_map(&IOmap);
-                // Corrected: Use Obytes and Ibytes instead of Obits and Ibits
-                printf("SOEM_Interface: IOmap re-configured after custom PDOs. New Output bytes: %d, Input bytes: %d.\n", ec_group[0].Obytes, ec_group[0].Ibytes);
-
 
                 // Re-calculate expected WKC
                 expectedWKC = (ec_group[0].outputsWKC * 2) + ec_group[0].inputsWKC;
@@ -611,14 +379,6 @@ int soem_interface_init(const char *ifname) {
                     return -1;
                 }
 
-                // --- IMPORTANT: Configure drive modes and controlword after PDO mapping ---
-                // Assuming "Cyclic Synchronous Position Mode" (CSP) as an example (mode 8).
-                // Adjust this mode based on your Synapticon drive's documentation and desired operation.
-                if (soem_interface_configure_drive_modes(slave_idx, 8) != 0) {
-                    fprintf(stderr, "SOEM_Interface: Failed to configure drive modes.\n");
-                    return -1;
-                }
-
             } else {
                 fprintf(stderr, "SOEM_Interface: Synapticon slave (index %d) not found.\n", slave_idx);
                 return -1;
@@ -626,8 +386,7 @@ int soem_interface_init(const char *ifname) {
 
             // Go to Operational state
             printf("SOEM_Interface: Requesting Operational state for all slaves...\n");
-            // Increased timeout as drive state transitions can take longer
-            ec_statecheck(0, EC_STATE_OPERATIONAL, EC_TIMEOUTSTATE * 5);
+            ec_statecheck(0, EC_STATE_OPERATIONAL, EC_TIMEOUTSTATE * 3); // Wait longer for all slaves
 
             // Check if all slaves are operational
             int all_slaves_operational = 1;
@@ -652,17 +411,17 @@ int soem_interface_init(const char *ifname) {
             } else {
                 fprintf(stderr, "SOEM_Interface: Not all slaves reached Operational state.\n");
                 for (i = 1; i <= ec_slavecount; i++) {
-                    printf("SOEM_Interface: Slave %d: Current State=%d (Operational=%s)\n",
+                    printf("SOEM_Interface: Slave %d: Current State=%d (Operational=%s)\n", 
                            i, ec_slave[i].state, is_slave_operational(i) ? "YES" : "NO");
                 }
                 return -1;
             }
         } else {
-            fprintf(stderr, "SOEM_Interface: No slaves found on %s after ec_config_init.\n", ifname);
+            fprintf(stderr, "SOEM_Interface: No slaves found on %s.\n", ifname);
             return -1;
         }
     } else {
-        fprintf(stderr, "SOEM_Interface: No EtherCAT master found on %s (ec_init failed).\n", ifname);
+        fprintf(stderr, "SOEM_Interface: No EtherCAT master found on %s.\n", ifname);
         return -1;
     }
 
