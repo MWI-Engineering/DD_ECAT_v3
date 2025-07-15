@@ -15,6 +15,18 @@
 #define HID_REPORT_SIZE 64
 #define HID_SEND_INTERVAL_MS 8  // Send reports every 8ms (125Hz) - typical for gaming controllers
 
+// FFB Effect Queue
+#define FFB_EFFECT_QUEUE_SIZE 16 // You can adjust this size as needed
+static ffb_effect_t ffb_effect_queue[FFB_EFFECT_QUEUE_SIZE];
+static int queue_head = 0;
+static int queue_tail = 0;
+static int queue_count = 0;
+static pthread_mutex_t queue_mutex = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t queue_cond = PTHREAD_COND_INITIALIZER;
+
+// Thread running flag
+static volatile int hid_running = 0;
+
 static int hidg_fd = -1;
 
 // Rate limiting for gamepad reports
