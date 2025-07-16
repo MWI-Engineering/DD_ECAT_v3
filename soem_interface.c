@@ -222,7 +222,7 @@ int soem_interface_set_ethercat_state(uint16_t slave_idx, ec_state desired_state
     return 0;
 }
 
-// --- Function to initialize CiA 402 motor parameters ---
+// Updated initialize_cia402_parameters function with better error handling
 int initialize_cia402_parameters(uint16_t slave_idx) {
     printf("SOEM_Interface: Initializing CiA 402 parameters for slave %u...\n", slave_idx);
     
@@ -234,7 +234,7 @@ int initialize_cia402_parameters(uint16_t slave_idx) {
     }
     
     // Set reasonable torque limits (adjust based on your motor specifications)
-    uint16_t max_torque = 13000; // 10 Nm, adjust as needed
+    uint16_t max_torque = 13000; // 13 Nm, adjust as needed
     if (soem_interface_write_sdo(slave_idx, 0x6072, 0x00, sizeof(max_torque), &max_torque) != 0) {
         printf("SOEM_Interface: Warning: Could not set max torque limit.\n");
     }
@@ -245,22 +245,20 @@ int initialize_cia402_parameters(uint16_t slave_idx) {
         printf("SOEM_Interface: Motor rated current: %u mA\n", motor_rated_current);
     }
     
-    // Enable quick stop option code (5 - disable drive function)
+    // Try to set option codes, but don't fail if they're not supported
     int16_t quick_stop_option = 5;
     if (soem_interface_write_sdo(slave_idx, 0x605A, 0x00, sizeof(quick_stop_option), &quick_stop_option) != 0) {
-        printf("SOEM_Interface: Warning: Could not set quick stop option code.\n");
+        printf("SOEM_Interface: Note: Quick stop option code not supported (this is normal for some devices).\n");
     }
     
-    // Set shutdown option code (0 - disable drive function)
     int16_t shutdown_option = 0;
     if (soem_interface_write_sdo(slave_idx, 0x605B, 0x00, sizeof(shutdown_option), &shutdown_option) != 0) {
-        printf("SOEM_Interface: Warning: Could not set shutdown option code.\n");
+        printf("SOEM_Interface: Note: Shutdown option code not supported (this is normal for some devices).\n");
     }
     
-    // Set disable operation option code (1 - disable drive function)
     int16_t disable_operation_option = 1;
     if (soem_interface_write_sdo(slave_idx, 0x605C, 0x00, sizeof(disable_operation_option), &disable_operation_option) != 0) {
-        printf("SOEM_Interface: Warning: Could not set disable operation option code.\n");
+        printf("SOEM_Interface: Note: Disable operation option code not supported (this is normal for some devices).\n");
     }
     
     printf("SOEM_Interface: CiA 402 parameters initialization completed.\n");
@@ -417,59 +415,6 @@ void *ecat_loop(void *ptr) {
 }
 
 // --- PDO Configuration Functions (simplified) ---
-int soem_interface_configure_pdo_mapping(uint16_t slave_idx, uint16_t pdo_assign_idx, uint16_t pdo_map_idx, uint32_t *mapped_objects, uint8_t num_mapped_objects) {
-    uint8_t zero_val = 0;
-    uint8_t original_assign_val = 1;
-    
-    printf("SOEM_Interface: Configuring PDO mapping for slave %u...\n", slave_idx);
-
-    // Set to Pre-operational
-    if (soem_interface_set_ethercat_state(slave_idx, EC_STATE_PRE_OP) != 0) {
-        return -1;
-    }
-    usleep(50000);
-
-    // Disable PDO
-    if (soem_interface_write_sdo(slave_idx, pdo_assign_idx, 0x00, sizeof(zero_val), &zero_val) != 0) {
-        return -1;
-    }
-    usleep(20000);
-
-    // Clear mapping
-    if (soem_interface_write_sdo(slave_idx, pdo_map_idx, 0x00, sizeof(zero_val), &zero_val) != 0) {
-        return -1;
-    }
-    usleep(20000);
-
-    // Write new mapping
-    for (uint8_t i = 0; i < num_mapped_objects; i++) {
-        if (soem_interface_write_sdo(slave_idx, pdo_map_idx, i + 1, sizeof(uint32_t), &mapped_objects[i]) != 0) {
-            return -1;
-        }
-        usleep(5000);
-    }
-
-    // Set number of mapped objects
-    if (soem_interface_write_sdo(slave_idx, pdo_map_idx, 0x00, sizeof(num_mapped_objects), &num_mapped_objects) != 0) {
-        return -1;
-    }
-    usleep(20000);
-
-    // Re-enable PDO
-    if (soem_interface_write_sdo(slave_idx, pdo_assign_idx, 0x00, sizeof(original_assign_val), &original_assign_val) != 0) {
-        return -1;
-    }
-    usleep(20000);
-
-    return 0;
-}
-
-
-
-// --- Main Interface Functions ---
-// soem_interface.c - Fixed version with explicit PDO configuration
-// Add this function to configure PDO mapping for SOMANET devices
-
 int configure_somanet_pdo_mapping(uint16_t slave_idx) {
     printf("SOEM_Interface: Configuring SOMANET PDO mapping for slave %u...\n", slave_idx);
     
@@ -521,6 +466,7 @@ int configure_somanet_pdo_mapping(uint16_t slave_idx) {
     return 0;
 }
 
+// --- Main Interface Functions ---
 // Updated soem_interface_init function
 int soem_interface_init(const char *ifname) {
     int i;
@@ -632,49 +578,6 @@ int soem_interface_init(const char *ifname) {
         fprintf(stderr, "SOEM_Interface: No EtherCAT master found.\n");
         return -1;
     }
-}
-
-// Updated initialize_cia402_parameters function with better error handling
-int initialize_cia402_parameters(uint16_t slave_idx) {
-    printf("SOEM_Interface: Initializing CiA 402 parameters for slave %u...\n", slave_idx);
-    
-    // Set modes of operation to torque mode (4)
-    int8_t torque_mode = 4;
-    if (soem_interface_write_sdo(slave_idx, 0x6060, 0x00, sizeof(torque_mode), &torque_mode) != 0) {
-        fprintf(stderr, "SOEM_Interface: Failed to set modes of operation to torque mode.\n");
-        return -1;
-    }
-    
-    // Set reasonable torque limits (adjust based on your motor specifications)
-    uint16_t max_torque = 13000; // 13 Nm, adjust as needed
-    if (soem_interface_write_sdo(slave_idx, 0x6072, 0x00, sizeof(max_torque), &max_torque) != 0) {
-        printf("SOEM_Interface: Warning: Could not set max torque limit.\n");
-    }
-    
-    // Read and display some basic motor parameters
-    uint32_t motor_rated_current = 0;
-    if (soem_interface_read_sdo(slave_idx, 0x6075, 0x00, sizeof(motor_rated_current), &motor_rated_current) == 0) {
-        printf("SOEM_Interface: Motor rated current: %u mA\n", motor_rated_current);
-    }
-    
-    // Try to set option codes, but don't fail if they're not supported
-    int16_t quick_stop_option = 5;
-    if (soem_interface_write_sdo(slave_idx, 0x605A, 0x00, sizeof(quick_stop_option), &quick_stop_option) != 0) {
-        printf("SOEM_Interface: Note: Quick stop option code not supported (this is normal for some devices).\n");
-    }
-    
-    int16_t shutdown_option = 0;
-    if (soem_interface_write_sdo(slave_idx, 0x605B, 0x00, sizeof(shutdown_option), &shutdown_option) != 0) {
-        printf("SOEM_Interface: Note: Shutdown option code not supported (this is normal for some devices).\n");
-    }
-    
-    int16_t disable_operation_option = 1;
-    if (soem_interface_write_sdo(slave_idx, 0x605C, 0x00, sizeof(disable_operation_option), &disable_operation_option) != 0) {
-        printf("SOEM_Interface: Note: Disable operation option code not supported (this is normal for some devices).\n");
-    }
-    
-    printf("SOEM_Interface: CiA 402 parameters initialization completed.\n");
-    return 0;
 }
 
 // --- External Interface Functions ---
