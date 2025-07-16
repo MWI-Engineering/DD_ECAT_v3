@@ -496,7 +496,7 @@ int configure_somanet_pdo_mapping(uint16_t slave_idx) {
         0x60FD0120,  // Physical inputs (32-bit)
         0x27020020   // Tuning status (32-bit)
     };
-    
+    /*
     // Configure RxPDO mapping (0x1600)
     if (soem_interface_configure_pdo_mapping(slave_idx, 0x1C00, 0x1600, 
                                            rxpdo_mapping, sizeof(rxpdo_mapping)/sizeof(uint32_t)) != 0) {
@@ -510,7 +510,7 @@ int configure_somanet_pdo_mapping(uint16_t slave_idx) {
         fprintf(stderr, "SOEM_Interface: Failed to configure TxPDO mapping.\n");
         return -1;
     }
-    
+    */
     printf("SOEM_Interface: PDO mapping configuration completed.\n");
     return 0;
 }
