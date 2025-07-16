@@ -245,7 +245,7 @@ int initialize_cia402_parameters(uint16_t slave_idx) {
     }
     
     // Set reasonable torque limits (adjust based on your motor specifications)
-    uint16_t max_torque = 1000; // 1000 mNm, adjust as needed
+    uint16_t max_torque = 13000; // 10 Nm, adjust as needed
     if (soem_interface_write_sdo(slave_idx, 0x6072, 0x00, sizeof(max_torque), &max_torque) != 0) {
         printf("SOEM_Interface: Warning: Could not set max torque limit.\n");
     }
