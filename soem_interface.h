@@ -112,9 +112,8 @@ int soem_interface_set_ethercat_state(uint16_t slave_idx, ec_state desired_state
  * (Index << 16 | Subindex << 8 | LengthInBits).
  * @param num_mapped_objects The number of objects in the mapped_objects array.
  * @return 0 on success, -1 on failure.
- */
-// int soem_interface_configure_pdo_mapping(uint16_t slave_idx, uint16_t pdo_assign_idx, uint16_t pdo_map_idx, uint32_t *mapped_objects, uint8_t num_mapped_objects);
-int configure_somanet_pdo_mapping(uint16_t slave_idx);
+ */ 
+int soem_interface_configure_pdo_mapping(uint16_t slave_idx, uint16_t pdo_assign_idx, uint16_t pdo_map_idx, uint32_t *mapped_objects, uint8_t num_mapped_objects);
 
 // --- CiA 402 State Machine Helper Functions ---
 

@@ -414,8 +414,7 @@ void *ecat_loop(void *ptr) {
     return NULL;
 }
 
-// --- PDO Configuration Functions (simplified) ---
-/*
+// --- PDO Configuration Functions ---
 int soem_interface_configure_pdo_mapping(uint16_t slave_idx, uint16_t pdo_assign_idx, uint16_t pdo_map_idx, uint32_t *mapped_objects, uint8_t num_mapped_objects) {
     uint8_t zero_val = 0;
     uint8_t original_assign_val = 1;
@@ -462,7 +461,6 @@ int soem_interface_configure_pdo_mapping(uint16_t slave_idx, uint16_t pdo_assign
 
     return 0;
 }
-*/
 
 int configure_somanet_pdo_mapping(uint16_t slave_idx) {
     printf("SOEM_Interface: Configuring SOMANET PDO mapping for slave %u...\n", slave_idx);
@@ -496,7 +494,7 @@ int configure_somanet_pdo_mapping(uint16_t slave_idx) {
         0x60FD0120,  // Physical inputs (32-bit)
         0x27020020   // Tuning status (32-bit)
     };
-    /*
+    
     // Configure RxPDO mapping (0x1600)
     if (soem_interface_configure_pdo_mapping(slave_idx, 0x1C00, 0x1600, 
                                            rxpdo_mapping, sizeof(rxpdo_mapping)/sizeof(uint32_t)) != 0) {
@@ -510,7 +508,7 @@ int configure_somanet_pdo_mapping(uint16_t slave_idx) {
         fprintf(stderr, "SOEM_Interface: Failed to configure TxPDO mapping.\n");
         return -1;
     }
-    */
+    
     printf("SOEM_Interface: PDO mapping configuration completed.\n");
     return 0;
 }
