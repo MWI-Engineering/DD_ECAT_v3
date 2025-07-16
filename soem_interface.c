@@ -415,6 +415,7 @@ void *ecat_loop(void *ptr) {
 }
 
 // --- PDO Configuration Functions (simplified) ---
+/*
 int soem_interface_configure_pdo_mapping(uint16_t slave_idx, uint16_t pdo_assign_idx, uint16_t pdo_map_idx, uint32_t *mapped_objects, uint8_t num_mapped_objects) {
     uint8_t zero_val = 0;
     uint8_t original_assign_val = 1;
@@ -461,6 +462,7 @@ int soem_interface_configure_pdo_mapping(uint16_t slave_idx, uint16_t pdo_assign
 
     return 0;
 }
+*/
 
 int configure_somanet_pdo_mapping(uint16_t slave_idx) {
     printf("SOEM_Interface: Configuring SOMANET PDO mapping for slave %u...\n", slave_idx);
