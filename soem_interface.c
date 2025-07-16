@@ -464,7 +464,64 @@ int soem_interface_configure_pdo_mapping(uint16_t slave_idx, uint16_t pdo_assign
     return 0;
 }
 
+
+
 // --- Main Interface Functions ---
+// soem_interface.c - Fixed version with explicit PDO configuration
+// Add this function to configure PDO mapping for SOMANET devices
+
+int configure_somanet_pdo_mapping(uint16_t slave_idx) {
+    printf("SOEM_Interface: Configuring SOMANET PDO mapping for slave %u...\n", slave_idx);
+    
+    // Set to Pre-operational for configuration
+    if (soem_interface_set_ethercat_state(slave_idx, EC_STATE_PRE_OP) != 0) {
+        return -1;
+    }
+    usleep(100000); // 100ms delay
+    
+    // Configure RxPDO (outputs from master to slave)
+    uint32_t rxpdo_mapping[] = {
+        0x60400010,  // Controlword (16-bit)
+        0x60600008,  // Modes of operation (8-bit)
+        0x60710010,  // Target torque (16-bit)
+        0x607A0020,  // Target position (32-bit)
+        0x60FF0020,  // Target velocity (32-bit)
+        0x60B20010,  // Torque offset (16-bit)
+        0x27010020,  // Tuning command (32-bit)
+        0x60FE0120   // Physical outputs (32-bit)
+    };
+    
+    // Configure TxPDO (inputs from slave to master)
+    uint32_t txpdo_mapping[] = {
+        0x60410010,  // Statusword (16-bit)
+        0x60610008,  // Modes of operation display (8-bit)
+        0x60640020,  // Position actual value (32-bit)
+        0x60690020,  // Velocity actual value (32-bit)
+        0x60770010,  // Torque actual value (16-bit)
+        0x60780010,  // Current actual value (16-bit)
+        0x60FD0120,  // Physical inputs (32-bit)
+        0x27020020   // Tuning status (32-bit)
+    };
+    
+    // Configure RxPDO mapping (0x1600)
+    if (soem_interface_configure_pdo_mapping(slave_idx, 0x1C00, 0x1600, 
+                                           rxpdo_mapping, sizeof(rxpdo_mapping)/sizeof(uint32_t)) != 0) {
+        fprintf(stderr, "SOEM_Interface: Failed to configure RxPDO mapping.\n");
+        return -1;
+    }
+    
+    // Configure TxPDO mapping (0x1A00)
+    if (soem_interface_configure_pdo_mapping(slave_idx, 0x1C01, 0x1A00, 
+                                           txpdo_mapping, sizeof(txpdo_mapping)/sizeof(uint32_t)) != 0) {
+        fprintf(stderr, "SOEM_Interface: Failed to configure TxPDO mapping.\n");
+        return -1;
+    }
+    
+    printf("SOEM_Interface: PDO mapping configuration completed.\n");
+    return 0;
+}
+
+// Updated soem_interface_init function
 int soem_interface_init(const char *ifname) {
     int i;
     int slave_idx = 1;
@@ -482,41 +539,59 @@ int soem_interface_init(const char *ifname) {
                 return -1;
             }
 
-            // Configure distributed clocks
-            ec_configdc();
-
             // Print slave information
             for (i = 1; i <= ec_slavecount; i++) {
                 printf("SOEM_Interface: Slave %d: Name=%s, OutputSize=%dbytes, InputSize=%dbytes\n",
                        i, ec_slave[i].name, ec_slave[i].Obits / 8, ec_slave[i].Ibits / 8);
             }
 
-            // Configure PDO mapping if needed
+            // Configure PDO mapping for SOMANET devices
             if (ec_slavecount >= slave_idx) {
-                // Use default PDO mapping first
+                // First configure the PDO mapping
+                if (configure_somanet_pdo_mapping(slave_idx) != 0) {
+                    fprintf(stderr, "SOEM_Interface: Failed to configure PDO mapping.\n");
+                    return -1;
+                }
+                
+                // Now map the IO after PDO configuration
                 ec_config_map(&IOmap);
                 
                 // Assign PDO pointers
                 if (ec_slave[slave_idx].outputs > 0) {
                     somanet_outputs = (somanet_rx_pdo_t *)(ec_slave[slave_idx].outputs);
-                    printf("SOEM_Interface: somanet_outputs mapped at %p\n", (void*)somanet_outputs);
+                    printf("SOEM_Interface: somanet_outputs mapped at %p (size: %d bytes)\n", 
+                           (void*)somanet_outputs, ec_slave[slave_idx].Obits / 8);
+                } else {
+                    fprintf(stderr, "SOEM_Interface: No output PDO data available!\n");
+                    return -1;
                 }
+                
                 if (ec_slave[slave_idx].inputs > 0) {
                     somanet_inputs = (somanet_tx_pdo_t *)(ec_slave[slave_idx].inputs);
-                    printf("SOEM_Interface: somanet_inputs mapped at %p\n", (void*)somanet_inputs);
+                    printf("SOEM_Interface: somanet_inputs mapped at %p (size: %d bytes)\n", 
+                           (void*)somanet_inputs, ec_slave[slave_idx].Ibits / 8);
+                } else {
+                    fprintf(stderr, "SOEM_Interface: No input PDO data available!\n");
+                    return -1;
                 }
 
                 expectedWKC = (ec_group[0].outputsWKC * 2) + ec_group[0].inputsWKC;
                 printf("SOEM_Interface: Expected WKC: %d\n", expectedWKC);
             }
 
+            // Initialize CiA 402 parameters (do this before transitioning to Safe-Op)
+            if (initialize_cia402_parameters(slave_idx) != 0) {
+                fprintf(stderr, "SOEM_Interface: Failed to initialize CiA 402 parameters.\n");
+                return -1;
+            }
+
             // Transition to Safe-Operational
             printf("SOEM_Interface: Requesting Safe-Operational state...\n");
             ec_statecheck(0, EC_STATE_SAFE_OP, EC_TIMEOUTSTATE * 4);
 
-            // Initialize CiA 402 parameters
-            if (initialize_cia402_parameters(slave_idx) != 0) {
-                fprintf(stderr, "SOEM_Interface: Failed to initialize CiA 402 parameters.\n");
+            // Check if we reached Safe-Op
+            if (!is_slave_operational(slave_idx) && (ec_slave[slave_idx].state & 0x0F) != EC_STATE_SAFE_OP) {
+                fprintf(stderr, "SOEM_Interface: Failed to reach Safe-Operational state.\n");
                 return -1;
             }
 
@@ -557,6 +632,49 @@ int soem_interface_init(const char *ifname) {
         fprintf(stderr, "SOEM_Interface: No EtherCAT master found.\n");
         return -1;
     }
+}
+
+// Updated initialize_cia402_parameters function with better error handling
+int initialize_cia402_parameters(uint16_t slave_idx) {
+    printf("SOEM_Interface: Initializing CiA 402 parameters for slave %u...\n", slave_idx);
+    
+    // Set modes of operation to torque mode (4)
+    int8_t torque_mode = 4;
+    if (soem_interface_write_sdo(slave_idx, 0x6060, 0x00, sizeof(torque_mode), &torque_mode) != 0) {
+        fprintf(stderr, "SOEM_Interface: Failed to set modes of operation to torque mode.\n");
+        return -1;
+    }
+    
+    // Set reasonable torque limits (adjust based on your motor specifications)
+    uint16_t max_torque = 13000; // 13 Nm, adjust as needed
+    if (soem_interface_write_sdo(slave_idx, 0x6072, 0x00, sizeof(max_torque), &max_torque) != 0) {
+        printf("SOEM_Interface: Warning: Could not set max torque limit.\n");
+    }
+    
+    // Read and display some basic motor parameters
+    uint32_t motor_rated_current = 0;
+    if (soem_interface_read_sdo(slave_idx, 0x6075, 0x00, sizeof(motor_rated_current), &motor_rated_current) == 0) {
+        printf("SOEM_Interface: Motor rated current: %u mA\n", motor_rated_current);
+    }
+    
+    // Try to set option codes, but don't fail if they're not supported
+    int16_t quick_stop_option = 5;
+    if (soem_interface_write_sdo(slave_idx, 0x605A, 0x00, sizeof(quick_stop_option), &quick_stop_option) != 0) {
+        printf("SOEM_Interface: Note: Quick stop option code not supported (this is normal for some devices).\n");
+    }
+    
+    int16_t shutdown_option = 0;
+    if (soem_interface_write_sdo(slave_idx, 0x605B, 0x00, sizeof(shutdown_option), &shutdown_option) != 0) {
+        printf("SOEM_Interface: Note: Shutdown option code not supported (this is normal for some devices).\n");
+    }
+    
+    int16_t disable_operation_option = 1;
+    if (soem_interface_write_sdo(slave_idx, 0x605C, 0x00, sizeof(disable_operation_option), &disable_operation_option) != 0) {
+        printf("SOEM_Interface: Note: Disable operation option code not supported (this is normal for some devices).\n");
+    }
+    
+    printf("SOEM_Interface: CiA 402 parameters initialization completed.\n");
+    return 0;
 }
 
 // --- External Interface Functions ---
