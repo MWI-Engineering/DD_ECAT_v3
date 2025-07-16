@@ -2,7 +2,7 @@
 
 ## Schematic layout
 
-- Based on: https://github.com/Ultrawipf/OpenFFBoard/wiki
+- Based on: <https://github.com/Ultrawipf/OpenFFBoard/wiki>
 - ![DD_ECAT_layout_v1](https://github.com/user-attachments/assets/eae2e943-441e-4428-8cb8-4dae76ef00f0)
 
 ## Concept idea
@@ -49,7 +49,7 @@ Add isolcpus=3 to the end of the line. This reserves the 4th core (core #3) for 
 
 - Clone SOEM:
 cd ~
-git clone https://github.com/OpenEtherCATsociety/SOEM.git
+git clone <https://github.com/OpenEtherCATsociety/SOEM.git>
 
 ##### Build SOEM
 
@@ -90,12 +90,12 @@ This step is critical. If it fails, do not proceed. Check your cabling, power, a
 
 - Clone DD_ECAT_v3:
 - cd ~
-- git clone https://github.com/Mwi93/DD_ECAT_v3.git
+- git clone <https://github.com/Mwi93/DD_ECAT_v3.git>
 - cd DD_ECAT_v3
 - make
 - Check if the ffb_app is made correctly
 
-##### to do:
+##### to do
 
 - Check via claude.ai (pro) all files if it works all together correctly.
 - Debug SOEM interface, the LED ring stays red during operation. Indicating there is a mismatch in PDO mapping.
@@ -105,7 +105,8 @@ This step is critical. If it fails, do not proceed. Check your cabling, power, a
 
 This phase makes the Pi appear as a joystick to your PC.
 
-##### Enable libcomposite:
+##### Enable libcomposite
+
 - cd ~
 - echo "dtoverlay=dwc2" | sudo tee -a /boot/config.txt
 - echo "libcomposite" | sudo tee -a /etc/modules
@@ -150,4 +151,4 @@ sudo reboot
 - cd DD_ECAT_v3
 - make
 - If correctly installed:
-- ./ffb_app eth1
+- sudo ./ffb_app eth1
