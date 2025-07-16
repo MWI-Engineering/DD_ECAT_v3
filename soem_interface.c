@@ -222,7 +222,7 @@ int soem_interface_set_ethercat_state(uint16_t slave_idx, ec_state desired_state
     return 0;
 }
 
-// Updated initialize_cia402_parameters function with better error handling
+// --- Function to initialize CiA 402 motor parameters ---
 int initialize_cia402_parameters(uint16_t slave_idx) {
     printf("SOEM_Interface: Initializing CiA 402 parameters for slave %u...\n", slave_idx);
     
@@ -415,6 +415,53 @@ void *ecat_loop(void *ptr) {
 }
 
 // --- PDO Configuration Functions (simplified) ---
+int soem_interface_configure_pdo_mapping(uint16_t slave_idx, uint16_t pdo_assign_idx, uint16_t pdo_map_idx, uint32_t *mapped_objects, uint8_t num_mapped_objects) {
+    uint8_t zero_val = 0;
+    uint8_t original_assign_val = 1;
+    
+    printf("SOEM_Interface: Configuring PDO mapping for slave %u...\n", slave_idx);
+
+    // Set to Pre-operational
+    if (soem_interface_set_ethercat_state(slave_idx, EC_STATE_PRE_OP) != 0) {
+        return -1;
+    }
+    usleep(50000);
+
+    // Disable PDO
+    if (soem_interface_write_sdo(slave_idx, pdo_assign_idx, 0x00, sizeof(zero_val), &zero_val) != 0) {
+        return -1;
+    }
+    usleep(20000);
+
+    // Clear mapping
+    if (soem_interface_write_sdo(slave_idx, pdo_map_idx, 0x00, sizeof(zero_val), &zero_val) != 0) {
+        return -1;
+    }
+    usleep(20000);
+
+    // Write new mapping
+    for (uint8_t i = 0; i < num_mapped_objects; i++) {
+        if (soem_interface_write_sdo(slave_idx, pdo_map_idx, i + 1, sizeof(uint32_t), &mapped_objects[i]) != 0) {
+            return -1;
+        }
+        usleep(5000);
+    }
+
+    // Set number of mapped objects
+    if (soem_interface_write_sdo(slave_idx, pdo_map_idx, 0x00, sizeof(num_mapped_objects), &num_mapped_objects) != 0) {
+        return -1;
+    }
+    usleep(20000);
+
+    // Re-enable PDO
+    if (soem_interface_write_sdo(slave_idx, pdo_assign_idx, 0x00, sizeof(original_assign_val), &original_assign_val) != 0) {
+        return -1;
+    }
+    usleep(20000);
+
+    return 0;
+}
+
 int configure_somanet_pdo_mapping(uint16_t slave_idx) {
     printf("SOEM_Interface: Configuring SOMANET PDO mapping for slave %u...\n", slave_idx);
     
@@ -467,7 +514,6 @@ int configure_somanet_pdo_mapping(uint16_t slave_idx) {
 }
 
 // --- Main Interface Functions ---
-// Updated soem_interface_init function
 int soem_interface_init(const char *ifname) {
     int i;
     int slave_idx = 1;
@@ -484,6 +530,9 @@ int soem_interface_init(const char *ifname) {
                 fprintf(stderr, "SOEM_Interface: No EtherCAT slaves found!\n");
                 return -1;
             }
+
+            // Configure distributed clocks
+            ec_configdc();
 
             // Print slave information
             for (i = 1; i <= ec_slavecount; i++) {
