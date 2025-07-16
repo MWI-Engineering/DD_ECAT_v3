@@ -1,462 +1,695 @@
-// hid_interface.c - Fixed version with rate limiting and error handling
-#include "hid_interface.h"
-#include "ffb_types.h"
+// soem_interface.c - Improved version with CiA 402 state machine and proper initialization
+#include "soem_interface.h"
 #include <stdio.h>
-#include <pthread.h>
 #include <unistd.h>
-#include <fcntl.h>
-#include <stdlib.h>
 #include <string.h>
-#include <errno.h>
-#include <time.h>
-#include <sys/time.h>
+#include <pthread.h>
+#include <stdarg.h>
+#include <math.h>
 
-#define HID_DEVICE_PATH "/dev/hidg0"
-#define HID_REPORT_SIZE 64
-#define HID_SEND_INTERVAL_MS 8  // Send reports every 8ms (125Hz) - typical for gaming controllers
+// --- SOEM Library Includes ---
+#include "ethercat.h"
+#include "ethercattype.h"
 
-// FFB Effect Queue
-#define FFB_EFFECT_QUEUE_SIZE 16 // You can adjust this size as needed
-static ffb_effect_t ffb_effect_queue[FFB_EFFECT_QUEUE_SIZE];
-static int queue_head = 0;
-static int queue_tail = 0;
-static int queue_count = 0;
-static pthread_mutex_t queue_mutex = PTHREAD_MUTEX_INITIALIZER;
-static pthread_cond_t queue_cond = PTHREAD_COND_INITIALIZER;
+#ifndef PACKED
+#define PACKED __attribute__((__packed__))
+#endif
 
-// Thread running flag
-static volatile int hid_running = 0;
+// --- CiA 402 State Machine Definitions ---
+#define CIA402_STATUSWORD_RTSO          0x0001  // Ready to switch on
+#define CIA402_STATUSWORD_SO            0x0002  // Switched on
+#define CIA402_STATUSWORD_OE            0x0004  // Operation enabled
+#define CIA402_STATUSWORD_FAULT         0x0008  // Fault
+#define CIA402_STATUSWORD_VE            0x0010  // Voltage enabled
+#define CIA402_STATUSWORD_QS            0x0020  // Quick stop
+#define CIA402_STATUSWORD_SOD           0x0040  // Switch on disabled
+#define CIA402_STATUSWORD_WARNING       0x0080  // Warning
+#define CIA402_STATUSWORD_REMOTE        0x0200  // Remote
+#define CIA402_STATUSWORD_TARGET        0x0400  // Target reached
+#define CIA402_STATUSWORD_INTERNAL      0x0800  // Internal limit active
 
-static int hidg_fd = -1;
+#define CIA402_CONTROLWORD_SO           0x0001  // Switch on
+#define CIA402_CONTROLWORD_EV           0x0002  // Enable voltage
+#define CIA402_CONTROLWORD_QS           0x0004  // Quick stop
+#define CIA402_CONTROLWORD_EO           0x0008  // Enable operation
+#define CIA402_CONTROLWORD_FAULT_RESET  0x0080  // Fault reset
 
-// Rate limiting for gamepad reports
-static struct timespec last_send_time = {0, 0};
-static int rate_limit_enabled = 1;
+// --- SOEM Global Variables ---
+char IOmap[4096];
+ec_ODlistt ODlist;
+ec_groupt DCgroup;
+int wkc;
+int expectedWKC;
+ec_timet tmo;
 
-// Add this helper function for time comparison
-static long timespec_diff_ms(struct timespec *start, struct timespec *end) {
-    return (end->tv_sec - start->tv_sec) * 1000 + (end->tv_nsec - start->tv_nsec) / 1000000;
+// --- PDO Structures for Synapticon ACTILINK-S (Slave 1) ---
+typedef struct PACKED
+{
+    uint16 controlword;         // 0x6040:0x00
+    int8   modes_of_operation;  // 0x6060:0x00
+    int16  target_torque;       // 0x6071:0x00
+    int32  target_position;     // 0x607A:0x00
+    int32  target_velocity;     // 0x60FF:0x00
+    int16  torque_offset;       // 0x60B2:0x00
+    uint32 tuning_command;      // 0x2701:0x00
+    uint32 physical_outputs;    // 0x60FE:0x01
+    uint32 bit_mask;            // Padding for alignment
+} somanet_rx_pdo_t;
+
+typedef struct PACKED
+{
+    uint16 statusword;                  // 0x6041:0x00
+    int8   modes_of_operation_display;  // 0x6061:0x00
+    int32  position_actual_value;       // 0x6064:0x00
+    int32  velocity_actual_value;       // 0x6069:0x00
+    int16  torque_actual_value;         // 0x6077:0x00
+    int16  current_actual_value;        // 0x6078:0x00
+    uint32 physical_inputs;             // 0x60FD:0x01
+    uint32 tuning_status;               // 0x2702:0x00
+} somanet_tx_pdo_t;
+
+// Pointers to the PDO data in the IOmap
+somanet_rx_pdo_t *somanet_outputs;
+somanet_tx_pdo_t *somanet_inputs;
+
+// Mutex for protecting PDO data access
+static pthread_mutex_t pdo_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+// Thread for EtherCAT communication
+static pthread_t ecat_thread;
+static volatile int ecat_thread_running = 0;
+static volatile int master_initialized = 0;
+static volatile int communication_ok = 0;
+
+// Global variables to hold current PDO values
+static float target_torque_f = 0.0f;
+static float current_position_f = 0.0f;
+static float current_velocity_f = 0.0f;
+static cia402_state_t current_cia402_state = CIA402_STATE_NOT_READY;
+static uint16_t current_statusword = 0;
+static uint16_t current_controlword = 0;
+
+// --- CiA 402 State Machine Functions ---
+cia402_state_t get_cia402_state(uint16_t statusword) {
+    // Extract relevant bits for state determination
+    uint16_t state_bits = statusword & 0x006F;
+    
+    switch (state_bits) {
+        case 0x0000: return CIA402_STATE_NOT_READY;
+        case 0x0040: return CIA402_STATE_SWITCH_ON_DISABLED;
+        case 0x0021: return CIA402_STATE_READY_TO_SWITCH_ON;
+        case 0x0023: return CIA402_STATE_SWITCHED_ON;
+        case 0x0027: return CIA402_STATE_OPERATION_ENABLED;
+        case 0x0007: return CIA402_STATE_QUICK_STOP_ACTIVE;
+        case 0x000F: return CIA402_STATE_FAULT_REACTION_ACTIVE;
+        case 0x0008: return CIA402_STATE_FAULT;
+        default: 
+            // Check for fault bit
+            if (statusword & CIA402_STATUSWORD_FAULT) {
+                return CIA402_STATE_FAULT;
+            }
+            return CIA402_STATE_NOT_READY;
+    }
 }
-static pthread_t ffb_reception_thread;
 
-// FFB Report structures matching your HID descriptor
-typedef struct {
-    uint8_t report_id;
-    uint8_t effect_id;
-    uint8_t magnitude;
-    uint8_t direction;
-    uint8_t duration;
-    uint8_t start_delay;
-    uint8_t reserved[2];
-} ffb_constant_force_report_t;
+const char* get_cia402_state_name(cia402_state_t state) {
+    switch (state) {
+        case CIA402_STATE_NOT_READY: return "NOT_READY";
+        case CIA402_STATE_SWITCH_ON_DISABLED: return "SWITCH_ON_DISABLED";
+        case CIA402_STATE_READY_TO_SWITCH_ON: return "READY_TO_SWITCH_ON";
+        case CIA402_STATE_SWITCHED_ON: return "SWITCHED_ON";
+        case CIA402_STATE_OPERATION_ENABLED: return "OPERATION_ENABLED";
+        case CIA402_STATE_QUICK_STOP_ACTIVE: return "QUICK_STOP_ACTIVE";
+        case CIA402_STATE_FAULT_REACTION_ACTIVE: return "FAULT_REACTION_ACTIVE";
+        case CIA402_STATE_FAULT: return "FAULT";
+        default: return "UNKNOWN";
+    }
+}
 
-typedef struct {
-    uint8_t report_id;
-    uint8_t effect_id;
-    uint8_t spring_coefficient;
-    uint8_t damper_coefficient;
-    uint8_t inertia_coefficient;
-    uint8_t friction_coefficient;
-    uint8_t reserved[2];
-} ffb_condition_report_t;
-
-typedef struct {
-    uint8_t report_id;
-    uint8_t effect_id;
-    uint8_t waveform;          // 0=square, 1=sine, 2=triangle, 3=sawtooth up, 4=sawtooth down
-    uint8_t magnitude;         // Peak amplitude
-    uint8_t offset;            // DC offset
-    uint8_t frequency;         // Frequency in Hz
-    uint8_t phase;             // Phase shift
-    uint8_t reserved;
-} ffb_periodic_report_t;
-
-typedef struct {
-    uint8_t report_id;
-    uint8_t effect_id;
-    uint8_t start_magnitude;   // Starting magnitude
-    uint8_t end_magnitude;     // Ending magnitude
-    uint8_t duration;          // Duration of ramp
-    uint8_t reserved[3];
-} ffb_ramp_report_t;
-
-typedef struct {
-    uint8_t report_id;
-    uint8_t effect_id;
-    uint8_t parameter_type;    // 0=gain, 1=sample_rate, 2=trigger_button, etc.
-    uint8_t value;
-    uint8_t reserved[4];
-} ffb_effect_param_report_t;
-
-typedef struct {
-    uint8_t report_id;
-    uint8_t effect_id;
-    uint8_t attack_level;      // Attack level (0-255)
-    uint8_t attack_time;       // Attack time
-    uint8_t fade_level;        // Fade level (0-255)
-    uint8_t fade_time;         // Fade time
-    uint8_t reserved[2];
-} ffb_envelope_report_t;
-
-typedef struct {
-    uint8_t report_id;
-    uint8_t control_type;      // 0=enable actuators, 1=disable actuators, 2=stop all effects, 3=device reset, 4=device pause, 5=device continue
-    uint8_t reserved[6];
-} ffb_device_control_report_t;
-
-// Parse FFB reports according to your HID descriptor
-static int parse_ffb_report(uint8_t *report, size_t len, ffb_effect_t *effect) {
-    if (len < 2) return 0;
-    
-    uint8_t report_id = report[0];
-    
-    switch (report_id) {
-        case 0x01: // PID State Report
-            printf("FFB: PID State Report received\n");
-            // Handle device state changes
-            return 0; // Not a force effect
-            
-        case 0x02: // Constant Force Effect
-            if (len >= sizeof(ffb_constant_force_report_t)) {
-                ffb_constant_force_report_t *cf = (ffb_constant_force_report_t *)report;
-                effect->type = FFB_EFFECT_CONSTANT_FORCE;
-                effect->id = cf->effect_id;
-                // Convert magnitude from 0-255 to -1.0 to +1.0
-                effect->magnitude = (cf->magnitude - 128) / 128.0f;
-                effect->direction = cf->direction * 360.0f / 255.0f; // Convert to degrees
-                effect->duration = cf->duration * 10; // Convert to milliseconds
-                effect->start_delay = cf->start_delay * 10; // Convert to milliseconds
-                printf("FFB: Constant Force - ID:%d, Mag:%.2f, Dir:%.1f°, Dur:%dms\n", 
-                       effect->id, effect->magnitude, effect->direction, effect->duration);
-                return 1;
+uint16_t get_cia402_controlword_for_transition(cia402_state_t current_state, cia402_state_t target_state) {
+    switch (current_state) {
+        case CIA402_STATE_NOT_READY:
+        case CIA402_STATE_SWITCH_ON_DISABLED:
+            if (target_state == CIA402_STATE_READY_TO_SWITCH_ON) {
+                return 0x0006; // Shutdown: Enable voltage + Quick stop
             }
             break;
             
-        case 0x03: // Spring/Damper/Inertia Effects
-            if (len >= sizeof(ffb_condition_report_t)) {
-                ffb_condition_report_t *cond = (ffb_condition_report_t *)report;
-                effect->id = cond->effect_id;
-                
-                // Store all coefficients
-                effect->spring_coefficient = cond->spring_coefficient / 255.0f;
-                effect->damper_coefficient = cond->damper_coefficient / 255.0f;
-                effect->inertia_coefficient = cond->inertia_coefficient / 255.0f;
-                effect->friction_coefficient = cond->friction_coefficient / 255.0f;
-                
-                // Determine primary effect type based on strongest coefficient
-                if (cond->spring_coefficient > cond->damper_coefficient && 
-                    cond->spring_coefficient > cond->inertia_coefficient) {
-                    effect->type = FFB_EFFECT_SPRING;
-                    effect->magnitude = cond->spring_coefficient / 255.0f;
-                } else if (cond->damper_coefficient > cond->inertia_coefficient) {
-                    effect->type = FFB_EFFECT_DAMPER;
-                    effect->magnitude = cond->damper_coefficient / 255.0f;
-                } else {
-                    effect->type = FFB_EFFECT_INERTIA;
-                    effect->magnitude = cond->inertia_coefficient / 255.0f;
-                }
-                
-                printf("FFB: Condition Effect - ID:%d, Type:%d, Mag:%.2f, Spring:%.2f, Damper:%.2f\n",
-                       effect->id, effect->type, effect->magnitude, effect->spring_coefficient, effect->damper_coefficient);
-                return 1;
+        case CIA402_STATE_READY_TO_SWITCH_ON:
+            if (target_state == CIA402_STATE_SWITCHED_ON) {
+                return 0x0007; // Switch on: Enable voltage + Quick stop + Switch on
             }
             break;
             
-        case 0x04: // Periodic Effects (Sine, Square, etc.)
-            if (len >= sizeof(ffb_periodic_report_t)) {
-                ffb_periodic_report_t *per = (ffb_periodic_report_t *)report;
-                effect->type = FFB_EFFECT_PERIODIC;
-                effect->id = per->effect_id;
-                effect->magnitude = per->magnitude / 255.0f;
-                effect->direction = 0.0f; // Periodic effects don't have direction in same way
-                effect->duration = 0; // Periodic effects are typically continuous
-                
-                // Store periodic-specific parameters in unused fields
-                effect->start_delay = per->waveform; // Waveform type
-                effect->timestamp = (per->frequency << 16) | (per->phase << 8) | per->offset; // Pack frequency, phase, offset
-                
-                printf("FFB: Periodic Effect - ID:%d, Waveform:%d, Mag:%.2f, Freq:%d, Phase:%d\n",
-                       effect->id, per->waveform, effect->magnitude, per->frequency, per->phase);
-                return 1;
+        case CIA402_STATE_SWITCHED_ON:
+            if (target_state == CIA402_STATE_OPERATION_ENABLED) {
+                return 0x000F; // Enable operation: All control bits set
             }
             break;
             
-        case 0x05: // Ramp Effects  
-            if (len >= sizeof(ffb_ramp_report_t)) {
-                ffb_ramp_report_t *ramp = (ffb_ramp_report_t *)report;
-                effect->type = FFB_EFFECT_RAMP;
-                effect->id = ramp->effect_id;
-                effect->magnitude = ramp->start_magnitude / 255.0f;
-                effect->direction = ramp->end_magnitude / 255.0f; // Reuse direction field for end magnitude
-                effect->duration = ramp->duration * 10; // Convert to milliseconds
-                
-                printf("FFB: Ramp Effect - ID:%d, Start:%.2f, End:%.2f, Dur:%dms\n",
-                       effect->id, effect->magnitude, effect->direction, effect->duration);
-                return 1;
-            }
-            break;
-            
-        case 0x06: // Effect Parameters
-            if (len >= sizeof(ffb_effect_param_report_t)) {
-                ffb_effect_param_report_t *param = (ffb_effect_param_report_t *)report;
-                printf("FFB: Effect Parameters - ID:%d, Type:%d, Value:%d\n",
-                       param->effect_id, param->parameter_type, param->value);
-                
-                // Could store parameter changes but for now just log
-                // In a full implementation, you might update existing effects in the queue
-                return 0; // Not a new effect, just parameters
-            }
-            break;
-            
-        case 0x07: // Envelope Parameters
-            if (len >= sizeof(ffb_envelope_report_t)) {
-                ffb_envelope_report_t *env = (ffb_envelope_report_t *)report;
-                printf("FFB: Envelope Parameters - ID:%d, Attack:%d/%d, Fade:%d/%d\n",
-                       env->effect_id, env->attack_level, env->attack_time, 
-                       env->fade_level, env->fade_time);
-                
-                // Could store envelope parameters but for now just log
-                // In a full implementation, you might update existing effects in the queue
-                return 0; // Not a new effect, just envelope
-            }
-            break;
-            
-        case 0x08: // Device Control
-            if (len >= sizeof(ffb_device_control_report_t)) {
-                ffb_device_control_report_t *ctrl = (ffb_device_control_report_t *)report;
-                printf("FFB: Device Control - Type:%d ", ctrl->control_type);
-                
-                switch (ctrl->control_type) {
-                    case 0:
-                        printf("(Enable Actuators)\n");
-                        break;
-                    case 1:
-                        printf("(Disable Actuators)\n");
-                        break;
-                    case 2:
-                        printf("(Stop All Effects)\n");
-                        // Clear the effect queue
-                        pthread_mutex_lock(&queue_mutex);
-                        queue_head = queue_tail = queue_count = 0;
-                        pthread_mutex_unlock(&queue_mutex);
-                        break;
-                    case 3:
-                        printf("(Device Reset)\n");
-                        // Clear the effect queue
-                        pthread_mutex_lock(&queue_mutex);
-                        queue_head = queue_tail = queue_count = 0;
-                        pthread_mutex_unlock(&queue_mutex);
-                        break;
-                    case 4:
-                        printf("(Device Pause)\n");
-                        break;
-                    case 5:
-                        printf("(Device Continue)\n");
-                        break;
-                    default:
-                        printf("(Unknown: %d)\n", ctrl->control_type);
-                        break;
-                }
-                return 0; // Not a force effect
-            }
-            break;
+        case CIA402_STATE_FAULT:
+            return 0x0080; // Fault reset
             
         default:
-            printf("FFB: Unknown report ID: 0x%02X\n", report_id);
-            return 0;
+            break;
     }
     
+    // Default: maintain current state
+    return 0x0006;
+}
+
+// --- Helper function to check if slave is in operational state ---
+int is_slave_operational(int slave_idx) {
+    uint16 actual_state = ec_slave[slave_idx].state & 0x0F;
+    return actual_state == EC_STATE_OPERATIONAL;
+}
+
+// --- Helper function to get readable state name ---
+const char* get_state_name(uint16 state) {
+    uint16 actual_state = state & 0x0F;
+    switch(actual_state) {
+        case EC_STATE_INIT: return "INIT";
+        case EC_STATE_PRE_OP: return "PRE_OP";
+        case EC_STATE_BOOT: return "BOOT";
+        case EC_STATE_SAFE_OP: return "SAFE_OP";
+        case EC_STATE_OPERATIONAL: return "OPERATIONAL";
+        default: return "UNKNOWN";
+    }
+}
+
+// --- Helper functions for SDO operations ---
+int soem_interface_write_sdo(uint16_t slave_idx, uint16_t index, uint8_t subindex, uint16_t data_size, void *data) {
+    int wkc_sdo;
+    wkc_sdo = ec_SDOwrite(slave_idx, index, subindex, FALSE, data_size, data, EC_TIMEOUTRXM);
+    if (wkc_sdo == 0) {
+        fprintf(stderr, "SOEM_Interface: SDO write failed for slave %u, index 0x%04X:%02X\n", slave_idx, index, subindex);
+        return -1;
+    }
     return 0;
 }
 
-// --- Private function for FFB reception ---
-static void* _usb_ffb_reception_thread(void* arg) {
-    (void)arg; // Suppress unused parameter warning
-    uint8_t report[HID_REPORT_SIZE];
+int soem_interface_read_sdo(uint16_t slave_idx, uint16_t index, uint8_t subindex, uint16_t data_size, void *data) {
+    int wkc_sdo;
+    int actual_size = data_size;
+    wkc_sdo = ec_SDOread(slave_idx, index, subindex, FALSE, &actual_size, data, EC_TIMEOUTRXM);
+    if (wkc_sdo == 0) {
+        fprintf(stderr, "SOEM_Interface: SDO read failed for slave %u, index 0x%04X:%02X\n", slave_idx, index, subindex);
+        return -1;
+    }
+    return 0;
+}
 
-    printf("FFB: Reception thread started\n");
+// --- Function to set EtherCAT slave state ---
+int soem_interface_set_ethercat_state(uint16_t slave_idx, ec_state desired_state) {
+    int wkc_state;
+    printf("SOEM_Interface: Attempting to set slave %u to state %s (%d)...\n", 
+           slave_idx, get_state_name(desired_state), desired_state);
     
-    while (hid_running) {
-        ssize_t len = read(hidg_fd, report, HID_REPORT_SIZE);
-        if (len > 0) {
-            printf("FFB: Received %zd bytes: ", len);
-            for (ssize_t i = 0; i < len && i < 8; i++) {
-                printf("0x%02X ", report[i]);
-            }
-            printf("\n");
-            
-            ffb_effect_t new_effect;
-            if (parse_ffb_report(report, (size_t)len, &new_effect)) {
-                pthread_mutex_lock(&queue_mutex);
-                if (queue_count < FFB_EFFECT_QUEUE_SIZE) {
-                    ffb_effect_queue[queue_tail] = new_effect;
-                    queue_tail = (queue_tail + 1) % FFB_EFFECT_QUEUE_SIZE;
-                    queue_count++;
-                    pthread_cond_signal(&queue_cond);
-                } else {
-                    printf("FFB: Effect queue full, dropping effect\n");
-                }
-                pthread_mutex_unlock(&queue_mutex);
-            }
-        } else if (len < 0 && errno != EAGAIN) {
-            perror("FFB: Error reading from hidg0");
-            break;
-        }
+    ec_slave[slave_idx].state = desired_state;
+    ec_writestate(slave_idx);
+    
+    wkc_state = ec_statecheck(slave_idx, desired_state, EC_TIMEOUTSTATE);
+    
+    if (wkc_state == 0) {
+        fprintf(stderr, "SOEM_Interface: Failed to set slave %u to state %s (%d). Current state: %s (%d)\n",
+                slave_idx, get_state_name(desired_state), desired_state, 
+                get_state_name(ec_slave[slave_idx].state), ec_slave[slave_idx].state);
+        return -1;
+    }
+    
+    printf("SOEM_Interface: Slave %u successfully transitioned to state %s (%d).\n", 
+           slave_idx, get_state_name(ec_slave[slave_idx].state), ec_slave[slave_idx].state);
+    return 0;
+}
 
-        usleep(1000); // 1ms polling
+// --- Function to initialize CiA 402 motor parameters ---
+int initialize_cia402_parameters(uint16_t slave_idx) {
+    printf("SOEM_Interface: Initializing CiA 402 parameters for slave %u...\n", slave_idx);
+    
+    // Set modes of operation to torque mode (4)
+    int8_t torque_mode = 4;
+    if (soem_interface_write_sdo(slave_idx, 0x6060, 0x00, sizeof(torque_mode), &torque_mode) != 0) {
+        fprintf(stderr, "SOEM_Interface: Failed to set modes of operation to torque mode.\n");
+        return -1;
+    }
+    
+    // Set reasonable torque limits (adjust based on your motor specifications)
+    uint16_t max_torque = 13000; // 13 Nm, adjust as needed
+    if (soem_interface_write_sdo(slave_idx, 0x6072, 0x00, sizeof(max_torque), &max_torque) != 0) {
+        printf("SOEM_Interface: Warning: Could not set max torque limit.\n");
+    }
+    
+    // Read and display some basic motor parameters
+    uint32_t motor_rated_current = 0;
+    if (soem_interface_read_sdo(slave_idx, 0x6075, 0x00, sizeof(motor_rated_current), &motor_rated_current) == 0) {
+        printf("SOEM_Interface: Motor rated current: %u mA\n", motor_rated_current);
+    }
+    
+    // Try to set option codes, but don't fail if they're not supported
+    int16_t quick_stop_option = 5;
+    if (soem_interface_write_sdo(slave_idx, 0x605A, 0x00, sizeof(quick_stop_option), &quick_stop_option) != 0) {
+        printf("SOEM_Interface: Note: Quick stop option code not supported (this is normal for some devices).\n");
+    }
+    
+    int16_t shutdown_option = 0;
+    if (soem_interface_write_sdo(slave_idx, 0x605B, 0x00, sizeof(shutdown_option), &shutdown_option) != 0) {
+        printf("SOEM_Interface: Note: Shutdown option code not supported (this is normal for some devices).\n");
+    }
+    
+    int16_t disable_operation_option = 1;
+    if (soem_interface_write_sdo(slave_idx, 0x605C, 0x00, sizeof(disable_operation_option), &disable_operation_option) != 0) {
+        printf("SOEM_Interface: Note: Disable operation option code not supported (this is normal for some devices).\n");
+    }
+    
+    printf("SOEM_Interface: CiA 402 parameters initialization completed.\n");
+    return 0;
+}
+
+// --- Function to perform CiA 402 state machine transition ---
+int perform_cia402_transition_to_operational(uint16_t slave_idx) {
+    printf("SOEM_Interface: Starting CiA 402 state machine transition to operational...\n");
+    
+    int max_attempts = 50;
+    int attempt = 0;
+    
+    while (attempt < max_attempts) {
+        // Read current statusword
+        if (somanet_inputs) {
+            current_statusword = somanet_inputs->statusword;
+        } else {
+            fprintf(stderr, "SOEM_Interface: somanet_inputs not available for status reading.\n");
+            return -1;
+        }
+        
+        current_cia402_state = get_cia402_state(current_statusword);
+        
+        printf("SOEM_Interface: Attempt %d - Current CiA 402 state: %s (statusword: 0x%04X)\n", 
+               attempt + 1, get_cia402_state_name(current_cia402_state), current_statusword);
+        
+        // Check if we're in operational state
+        if (current_cia402_state == CIA402_STATE_OPERATION_ENABLED) {
+            printf("SOEM_Interface: Successfully reached Operation Enabled state!\n");
+            return 0;
+        }
+        
+        // Handle fault state
+        if (current_cia402_state == CIA402_STATE_FAULT) {
+            printf("SOEM_Interface: Device in fault state. Attempting fault reset...\n");
+            current_controlword = CIA402_CONTROLWORD_FAULT_RESET;
+        } else {
+            // Determine next transition
+            switch (current_cia402_state) {
+                case CIA402_STATE_NOT_READY:
+                case CIA402_STATE_SWITCH_ON_DISABLED:
+                    current_controlword = 0x0006; // Shutdown
+                    break;
+                case CIA402_STATE_READY_TO_SWITCH_ON:
+                    current_controlword = 0x0007; // Switch on
+                    break;
+                case CIA402_STATE_SWITCHED_ON:
+                    current_controlword = 0x000F; // Enable operation
+                    break;
+                case CIA402_STATE_QUICK_STOP_ACTIVE:
+                    current_controlword = 0x0006; // Shutdown
+                    break;
+                default:
+                    current_controlword = 0x0006; // Default to shutdown
+                    break;
+            }
+        }
+        
+        // Apply controlword
+        if (somanet_outputs) {
+            somanet_outputs->controlword = current_controlword;
+        }
+        
+        // Send PDO data
+        ec_send_processdata();
+        wkc = ec_receive_processdata(EC_TIMEOUTRET);
+        
+        printf("SOEM_Interface: Applied controlword: 0x%04X\n", current_controlword);
+        
+        attempt++;
+        usleep(100000); // 100ms delay between attempts
+    }
+    
+    fprintf(stderr, "SOEM_Interface: Failed to reach operational state after %d attempts.\n", max_attempts);
+    return -1;
+}
+
+// --- SOEM Thread Function ---
+void *ecat_loop(void *ptr) {
+    int slave_idx = 1;
+    int state_machine_initialized = 0;
+
+    printf("SOEM_Interface: EtherCAT thread started.\n");
+
+    while (!master_initialized && ecat_thread_running) {
+        usleep(10000);
     }
 
-    printf("FFB: Reception thread stopped\n");
+    if (!master_initialized) {
+        printf("SOEM_Interface: Master not initialized, exiting thread.\n");
+        return NULL;
+    }
+
+    printf("SOEM_Interface: Entering EtherCAT cyclic loop.\n");
+
+    while (ecat_thread_running) {
+        // Update output PDO data
+        pthread_mutex_lock(&pdo_mutex);
+        if (somanet_outputs) {
+            // Only update torque if we're in operational state
+            if (current_cia402_state == CIA402_STATE_OPERATION_ENABLED) {
+                somanet_outputs->target_torque = (int16_t)(target_torque_f * 1000.0f);
+            } else {
+                somanet_outputs->target_torque = 0; // Safe value
+            }
+            
+            // Keep controlword updated for state machine
+            somanet_outputs->controlword = current_controlword;
+            somanet_outputs->modes_of_operation = 4; // Torque mode
+        }
+        pthread_mutex_unlock(&pdo_mutex);
+
+        // Exchange process data
+        ec_send_processdata();
+        wkc = ec_receive_processdata(EC_TIMEOUTRET);
+
+        if (wkc >= expectedWKC) {
+            communication_ok = 1;
+            
+            // Update input PDO data
+            pthread_mutex_lock(&pdo_mutex);
+            if (somanet_inputs) {
+                current_statusword = somanet_inputs->statusword;
+                current_cia402_state = get_cia402_state(current_statusword);
+                current_position_f = (float)somanet_inputs->position_actual_value;
+                current_velocity_f = (float)somanet_inputs->velocity_actual_value;
+            }
+            pthread_mutex_unlock(&pdo_mutex);
+            
+            // Initialize state machine once
+            if (!state_machine_initialized && somanet_inputs && somanet_outputs) {
+                if (perform_cia402_transition_to_operational(slave_idx) == 0) {
+                    state_machine_initialized = 1;
+                    printf("SOEM_Interface: CiA 402 state machine initialized successfully.\n");
+                } else {
+                    fprintf(stderr, "SOEM_Interface: Failed to initialize CiA 402 state machine.\n");
+                }
+            }
+        } else {
+            communication_ok = 0;
+        }
+
+        // Check EtherCAT slave state
+        if (!is_slave_operational(slave_idx)) {
+            ec_statecheck(slave_idx, EC_STATE_OPERATIONAL, EC_TIMEOUTSTATE);
+        }
+
+        usleep(1000); // 1ms cycle time
+    }
+
+    printf("SOEM_Interface: EtherCAT thread stopping.\n");
     return NULL;
 }
 
-/**
- * @brief Initializes the HID interface.
- * @return 0 on success, -1 on failure.
- */
-int hid_interface_init() {
-    hidg_fd = open(HID_DEVICE_PATH, O_RDWR | O_NONBLOCK);
-    if (hidg_fd < 0) {
-        perror("HIDInterface: Failed to open /dev/hidg0");
-        return -1;
-    }
-
-    printf("HIDInterface: Opened /dev/hidg0 for USB HID gadget.\n");
-    return 0;
-}
-
-/**
- * @brief Starts the HID communication threads (e.g., for receiving FFB effects).
- * @return 0 on success, -1 on failure.
- */
-int hid_interface_start() {
-    hid_running = 1;
-    if (pthread_create(&ffb_reception_thread, NULL, _usb_ffb_reception_thread, NULL) != 0) {
-        perror("HIDInterface: Failed to create FFB reception thread");
-        return -1;
-    }
-    printf("HIDInterface: Started FFB reception thread.\n");
-    return 0;
-}
-
-/**
- * @brief Stops the HID communication and cleans up resources.
- */
-void hid_interface_stop() {
-    hid_running = 0;
-    if (ffb_reception_thread) {
-        pthread_join(ffb_reception_thread, NULL);
-    }
-
-    if (hidg_fd >= 0) {
-        close(hidg_fd);
-        hidg_fd = -1;
-    }
-
-    printf("HIDInterface: Closed /dev/hidg0 and stopped.\n");
-}
-
-/**
- * @brief Retrieves the latest FFB effect from the queue.
- * @param effect_out Pointer to an ffb_effect_t struct to store the effect.
- * @return 1 if an effect was retrieved, 0 if the queue is empty.
- */
-int hid_interface_get_ffb_effect(ffb_effect_t *effect_out) {
-    pthread_mutex_lock(&queue_mutex);
-    if (queue_count > 0) {
-        *effect_out = ffb_effect_queue[queue_head];
-        queue_head = (queue_head + 1) % FFB_EFFECT_QUEUE_SIZE;
-        queue_count--;
-        pthread_mutex_unlock(&queue_mutex);
-        return 1;
-    }
-    pthread_mutex_unlock(&queue_mutex);
-    return 0;
-}
-
-/**
- * @brief Sends a gamepad report (position, buttons) to the PC via USB gadget.
- * @param position The current position of the steering wheel.
- * @param buttons The state of the buttons (bitmask).
- */
-void hid_interface_send_gamepad_report(float position, unsigned int buttons) {
-    if (hidg_fd < 0) return;
-
-    // Rate limiting: only send reports every HID_SEND_INTERVAL_MS milliseconds
-    if (rate_limit_enabled) {
-        struct timespec current_time;
-        clock_gettime(CLOCK_MONOTONIC, &current_time);
-        
-        if (last_send_time.tv_sec != 0 || last_send_time.tv_nsec != 0) {
-            long elapsed_ms = timespec_diff_ms(&last_send_time, &current_time);
-            if (elapsed_ms < HID_SEND_INTERVAL_MS) {
-                return; // Skip this report to avoid overwhelming the HID device
-            }
-        }
-        last_send_time = current_time;
-    }
-
-    uint8_t report[HID_REPORT_SIZE] = {0};
-
-    // Format matching your HID descriptor:
-    // Bytes 0-1: Steering wheel position (int16_t, scaled from -32767 to 32767)
-    // Bytes 2-3: Button state (16 buttons, bitmask)
+// --- PDO Configuration Functions (simplified) ---
+int soem_interface_configure_pdo_mapping(uint16_t slave_idx, uint16_t pdo_assign_idx, uint16_t pdo_map_idx, uint32_t *mapped_objects, uint8_t num_mapped_objects) {
+    uint8_t zero_val = 0;
+    uint8_t original_assign_val = 1;
     
-    int16_t scaled_pos = (int16_t)(position * 32767.0f);  // Assumes position in [-1.0, 1.0]
-    report[0] = scaled_pos & 0xFF;
-    report[1] = (scaled_pos >> 8) & 0xFF;
-    report[2] = buttons & 0xFF;
-    report[3] = (buttons >> 8) & 0xFF;
+    printf("SOEM_Interface: Configuring PDO mapping for slave %u...\n", slave_idx);
 
-    ssize_t bytes_written = write(hidg_fd, report, HID_REPORT_SIZE);
-    if (bytes_written < 0) {
-        if (errno == EAGAIN || errno == EWOULDBLOCK) {
-            // Device buffer is full, this is normal - just skip this report
-            // Don't spam the console with these errors
-            static int eagain_count = 0;
-            if (++eagain_count % 100 == 0) {
-                printf("HIDInterface: Device buffer full (%d times), skipping reports\n", eagain_count);
+    // Set to Pre-operational
+    if (soem_interface_set_ethercat_state(slave_idx, EC_STATE_PRE_OP) != 0) {
+        return -1;
+    }
+    usleep(50000);
+
+    // Disable PDO
+    if (soem_interface_write_sdo(slave_idx, pdo_assign_idx, 0x00, sizeof(zero_val), &zero_val) != 0) {
+        return -1;
+    }
+    usleep(20000);
+
+    // Clear mapping
+    if (soem_interface_write_sdo(slave_idx, pdo_map_idx, 0x00, sizeof(zero_val), &zero_val) != 0) {
+        return -1;
+    }
+    usleep(20000);
+
+    // Write new mapping
+    for (uint8_t i = 0; i < num_mapped_objects; i++) {
+        if (soem_interface_write_sdo(slave_idx, pdo_map_idx, i + 1, sizeof(uint32_t), &mapped_objects[i]) != 0) {
+            return -1;
+        }
+        usleep(5000);
+    }
+
+    // Set number of mapped objects
+    if (soem_interface_write_sdo(slave_idx, pdo_map_idx, 0x00, sizeof(num_mapped_objects), &num_mapped_objects) != 0) {
+        return -1;
+    }
+    usleep(20000);
+
+    // Re-enable PDO
+    if (soem_interface_write_sdo(slave_idx, pdo_assign_idx, 0x00, sizeof(original_assign_val), &original_assign_val) != 0) {
+        return -1;
+    }
+    usleep(20000);
+
+    return 0;
+}
+
+int configure_somanet_pdo_mapping(uint16_t slave_idx) {
+    printf("SOEM_Interface: Configuring SOMANET PDO mapping for slave %u...\n", slave_idx);
+    
+    // Set to Pre-operational for configuration
+    if (soem_interface_set_ethercat_state(slave_idx, EC_STATE_PRE_OP) != 0) {
+        return -1;
+    }
+    usleep(100000); // 100ms delay
+    
+    // Configure RxPDO (outputs from master to slave)
+    uint32_t rxpdo_mapping[] = {
+        0x60400010,  // Controlword (16-bit)
+        0x60600008,  // Modes of operation (8-bit)
+        0x60710010,  // Target torque (16-bit)
+        0x607A0020,  // Target position (32-bit)
+        0x60FF0020,  // Target velocity (32-bit)
+        0x60B20010,  // Torque offset (16-bit)
+        0x27010020,  // Tuning command (32-bit)
+        0x60FE0120   // Physical outputs (32-bit)
+    };
+    
+    // Configure TxPDO (inputs from slave to master)
+    uint32_t txpdo_mapping[] = {
+        0x60410010,  // Statusword (16-bit)
+        0x60610008,  // Modes of operation display (8-bit)
+        0x60640020,  // Position actual value (32-bit)
+        0x60690020,  // Velocity actual value (32-bit)
+        0x60770010,  // Torque actual value (16-bit)
+        0x60780010,  // Current actual value (16-bit)
+        0x60FD0120,  // Physical inputs (32-bit)
+        0x27020020   // Tuning status (32-bit)
+    };
+    
+    // Configure RxPDO mapping (0x1600)
+    if (soem_interface_configure_pdo_mapping(slave_idx, 0x1C00, 0x1600, 
+                                           rxpdo_mapping, sizeof(rxpdo_mapping)/sizeof(uint32_t)) != 0) {
+        fprintf(stderr, "SOEM_Interface: Failed to configure RxPDO mapping.\n");
+        return -1;
+    }
+    
+    // Configure TxPDO mapping (0x1A00)
+    if (soem_interface_configure_pdo_mapping(slave_idx, 0x1C01, 0x1A00, 
+                                           txpdo_mapping, sizeof(txpdo_mapping)/sizeof(uint32_t)) != 0) {
+        fprintf(stderr, "SOEM_Interface: Failed to configure TxPDO mapping.\n");
+        return -1;
+    }
+    
+    printf("SOEM_Interface: PDO mapping configuration completed.\n");
+    return 0;
+}
+
+// --- Main Interface Functions ---
+int soem_interface_init(const char *ifname) {
+    int i;
+    int slave_idx = 1;
+
+    printf("SOEM_Interface: Initializing EtherCAT master on %s...\n", ifname);
+
+    if (ec_init(ifname)) {
+        printf("SOEM_Interface: ec_init on %s succeeded.\n", ifname);
+
+        if (ec_config_init(FALSE) > 0) {
+            printf("SOEM_Interface: %d slaves found and configured.\n", ec_slavecount);
+
+            if (ec_slavecount == 0) {
+                fprintf(stderr, "SOEM_Interface: No EtherCAT slaves found!\n");
+                return -1;
+            }
+
+            // Configure distributed clocks
+            ec_configdc();
+
+            // Print slave information
+            for (i = 1; i <= ec_slavecount; i++) {
+                printf("SOEM_Interface: Slave %d: Name=%s, OutputSize=%dbytes, InputSize=%dbytes\n",
+                       i, ec_slave[i].name, ec_slave[i].Obits / 8, ec_slave[i].Ibits / 8);
+            }
+
+            // Configure PDO mapping for SOMANET devices
+            if (ec_slavecount >= slave_idx) {
+                // First configure the PDO mapping
+                if (configure_somanet_pdo_mapping(slave_idx) != 0) {
+                    fprintf(stderr, "SOEM_Interface: Failed to configure PDO mapping.\n");
+                    return -1;
+                }
+                
+                // Now map the IO after PDO configuration
+                ec_config_map(&IOmap);
+                
+                // Assign PDO pointers
+                if (ec_slave[slave_idx].outputs > 0) {
+                    somanet_outputs = (somanet_rx_pdo_t *)(ec_slave[slave_idx].outputs);
+                    printf("SOEM_Interface: somanet_outputs mapped at %p (size: %d bytes)\n", 
+                           (void*)somanet_outputs, ec_slave[slave_idx].Obits / 8);
+                } else {
+                    fprintf(stderr, "SOEM_Interface: No output PDO data available!\n");
+                    return -1;
+                }
+                
+                if (ec_slave[slave_idx].inputs > 0) {
+                    somanet_inputs = (somanet_tx_pdo_t *)(ec_slave[slave_idx].inputs);
+                    printf("SOEM_Interface: somanet_inputs mapped at %p (size: %d bytes)\n", 
+                           (void*)somanet_inputs, ec_slave[slave_idx].Ibits / 8);
+                } else {
+                    fprintf(stderr, "SOEM_Interface: No input PDO data available!\n");
+                    return -1;
+                }
+
+                expectedWKC = (ec_group[0].outputsWKC * 2) + ec_group[0].inputsWKC;
+                printf("SOEM_Interface: Expected WKC: %d\n", expectedWKC);
+            }
+
+            // Initialize CiA 402 parameters (do this before transitioning to Safe-Op)
+            if (initialize_cia402_parameters(slave_idx) != 0) {
+                fprintf(stderr, "SOEM_Interface: Failed to initialize CiA 402 parameters.\n");
+                return -1;
+            }
+
+            // Transition to Safe-Operational
+            printf("SOEM_Interface: Requesting Safe-Operational state...\n");
+            ec_statecheck(0, EC_STATE_SAFE_OP, EC_TIMEOUTSTATE * 4);
+
+            // Check if we reached Safe-Op
+            if (!is_slave_operational(slave_idx) && (ec_slave[slave_idx].state & 0x0F) != EC_STATE_SAFE_OP) {
+                fprintf(stderr, "SOEM_Interface: Failed to reach Safe-Operational state.\n");
+                return -1;
+            }
+
+            // Transition to Operational
+            printf("SOEM_Interface: Requesting Operational state...\n");
+            ec_statecheck(0, EC_STATE_OPERATIONAL, EC_TIMEOUTSTATE * 4);
+
+            // Verify all slaves are operational
+            int all_operational = 1;
+            for (i = 1; i <= ec_slavecount; i++) {
+                if (!is_slave_operational(i)) {
+                    printf("SOEM_Interface: Slave %d not operational. State: %s (%d)\n", 
+                           i, get_state_name(ec_slave[i].state), ec_slave[i].state);
+                    all_operational = 0;
+                }
+            }
+
+            if (all_operational) {
+                printf("SOEM_Interface: All slaves operational. Starting communication thread...\n");
+                master_initialized = 1;
+                ecat_thread_running = 1;
+                
+                if (pthread_create(&ecat_thread, NULL, ecat_loop, NULL) != 0) {
+                    fprintf(stderr, "SOEM_Interface: Failed to create EtherCAT thread.\n");
+                    return -1;
+                }
+                
+                return 0;
+            } else {
+                fprintf(stderr, "SOEM_Interface: Not all slaves operational.\n");
+                return -1;
             }
         } else {
-            // Other errors are more serious
-            perror("HIDInterface: Failed to send gamepad report");
+            fprintf(stderr, "SOEM_Interface: No slaves found.\n");
+            return -1;
         }
+    } else {
+        fprintf(stderr, "SOEM_Interface: No EtherCAT master found.\n");
+        return -1;
     }
 }
 
-/**
- * @brief Enable or disable rate limiting for gamepad reports
- * @param enable 1 to enable rate limiting, 0 to disable
- */
-void hid_interface_set_rate_limiting(int enable) {
-    rate_limit_enabled = enable;
-    if (!enable) {
-        // Reset the last send time when disabling rate limiting
-        last_send_time.tv_sec = 0;
-        last_send_time.tv_nsec = 0;
-    }
+// --- External Interface Functions ---
+void soem_interface_send_and_receive_pdo(float target_torque) {
+    if (!master_initialized) return;
+    
+    pthread_mutex_lock(&pdo_mutex);
+    target_torque_f = target_torque;
+    pthread_mutex_unlock(&pdo_mutex);
 }
 
-/**
- * @brief Alternative: Use blocking I/O for more reliable transmission
- * Call this after hid_interface_init() if you want blocking writes
- */
-int hid_interface_set_blocking_mode() {
-    if (hidg_fd < 0) return -1;
-    
-    int flags = fcntl(hidg_fd, F_GETFL);
-    if (flags == -1) {
-        perror("HIDInterface: Failed to get file flags");
-        return -1;
+float soem_interface_get_current_position() {
+    float position;
+    pthread_mutex_lock(&pdo_mutex);
+    position = current_position_f;
+    pthread_mutex_unlock(&pdo_mutex);
+    return position;
+}
+
+float soem_interface_get_current_velocity() {
+    float velocity;
+    pthread_mutex_lock(&pdo_mutex);
+    velocity = current_velocity_f;
+    pthread_mutex_unlock(&pdo_mutex);
+    return velocity;
+}
+
+int soem_interface_get_communication_status() {
+    return communication_ok;
+}
+
+cia402_state_t soem_interface_get_cia402_state() {
+    return current_cia402_state;
+}
+
+uint16_t soem_interface_get_statusword() {
+    return current_statusword;
+}
+
+void soem_interface_stop_master() {
+    if (master_initialized) {
+        printf("SOEM_Interface: Stopping EtherCAT master...\n");
+
+        ecat_thread_running = 0;
+        if (ecat_thread) {
+            pthread_join(ecat_thread, NULL);
+        }
+
+        // Safe shutdown: disable operation
+        if (somanet_outputs) {
+            somanet_outputs->target_torque = 0;
+            somanet_outputs->controlword = 0x0006; // Shutdown
+        }
+        ec_send_processdata();
+        
+        usleep(100000); // Wait 100ms
+
+        // Transition to Safe-Op then Init
+        soem_interface_set_ethercat_state(0, EC_STATE_SAFE_OP);
+        soem_interface_set_ethercat_state(0, EC_STATE_INIT);
+
+        ec_close();
+        master_initialized = 0;
+        printf("SOEM_Interface: EtherCAT master stopped.\n");
     }
-    
-    // Remove O_NONBLOCK flag to make writes blocking
-    flags &= ~O_NONBLOCK;
-    if (fcntl(hidg_fd, F_SETFL, flags) == -1) {
-        perror("HIDInterface: Failed to set blocking mode");
-        return -1;
-    }
-    
-    printf("HIDInterface: Switched to blocking mode\n");
-    return 0;
 }
