@@ -34,18 +34,6 @@
 #define CIA402_CONTROLWORD_EO           0x0008  // Enable operation
 #define CIA402_CONTROLWORD_FAULT_RESET  0x0080  // Fault reset
 
-// CiA 402 States
-typedef enum {
-    CIA402_STATE_NOT_READY = 0,
-    CIA402_STATE_SWITCH_ON_DISABLED,
-    CIA402_STATE_READY_TO_SWITCH_ON,
-    CIA402_STATE_SWITCHED_ON,
-    CIA402_STATE_OPERATION_ENABLED,
-    CIA402_STATE_QUICK_STOP_ACTIVE,
-    CIA402_STATE_FAULT_REACTION_ACTIVE,
-    CIA402_STATE_FAULT
-} cia402_state_t;
-
 // --- SOEM Global Variables ---
 char IOmap[4096];
 ec_ODlistt ODlist;
@@ -202,7 +190,8 @@ int soem_interface_write_sdo(uint16_t slave_idx, uint16_t index, uint8_t subinde
 
 int soem_interface_read_sdo(uint16_t slave_idx, uint16_t index, uint8_t subindex, uint16_t data_size, void *data) {
     int wkc_sdo;
-    wkc_sdo = ec_SDOread(slave_idx, index, subindex, FALSE, &data_size, data, EC_TIMEOUTRXM);
+    int actual_size = data_size;
+    wkc_sdo = ec_SDOread(slave_idx, index, subindex, FALSE, &actual_size, data, EC_TIMEOUTRXM);
     if (wkc_sdo == 0) {
         fprintf(stderr, "SOEM_Interface: SDO read failed for slave %u, index 0x%04X:%02X\n", slave_idx, index, subindex);
         return -1;
