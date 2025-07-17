@@ -414,6 +414,38 @@ void *ecat_loop(void *ptr) {
     return NULL;
 }
 
+// Function to check if PDO mapping is needed by comparing current mapping
+int check_pdo_mapping_needed(uint16_t slave_idx) {
+    uint8_t num_mapped_objects = 0;
+    uint32_t mapped_object = 0;
+    
+    // Check RxPDO mapping (0x1600)
+    if (soem_interface_read_sdo(slave_idx, 0x1600, 0x00, sizeof(num_mapped_objects), &num_mapped_objects) == 0) {
+        printf("SOEM_Interface: Current RxPDO mapping has %d objects\n", num_mapped_objects);
+        
+        // Read first few mapped objects to see if they match our expected mapping
+        for (int i = 1; i <= num_mapped_objects && i <= 3; i++) {
+            if (soem_interface_read_sdo(slave_idx, 0x1600, i, sizeof(mapped_object), &mapped_object) == 0) {
+                printf("SOEM_Interface: RxPDO[%d] = 0x%08X\n", i, mapped_object);
+            }
+        }
+    }
+    
+    // Check TxPDO mapping (0x1A00)
+    if (soem_interface_read_sdo(slave_idx, 0x1A00, 0x00, sizeof(num_mapped_objects), &num_mapped_objects) == 0) {
+        printf("SOEM_Interface: Current TxPDO mapping has %d objects\n", num_mapped_objects);
+        
+        // Read first few mapped objects
+        for (int i = 1; i <= num_mapped_objects && i <= 3; i++) {
+            if (soem_interface_read_sdo(slave_idx, 0x1A00, i, sizeof(mapped_object), &mapped_object) == 0) {
+                printf("SOEM_Interface: TxPDO[%d] = 0x%08X\n", i, mapped_object);
+            }
+        }
+    }
+    
+    return 1; // For now, always configure - you can add logic to check if current mapping matches expected
+}
+
 // --- PDO Configuration Functions ---
 int soem_interface_configure_pdo_mapping(uint16_t slave_idx, uint16_t pdo_assign_idx, uint16_t pdo_map_idx, uint32_t *mapped_objects, uint8_t num_mapped_objects) {
     uint8_t zero_val = 0;
@@ -471,45 +503,53 @@ int configure_somanet_pdo_mapping(uint16_t slave_idx) {
     }
     usleep(100000); // 100ms delay
     
-    // Configure RxPDO (outputs from master to slave)
+    // Check if PDO mapping is needed
+    if (!check_pdo_mapping_needed(slave_idx)) {
+        printf("SOEM_Interface: PDO mapping already configured correctly.\n");
+        return 0;
+    }
+    
+    // Configure RxPDO (outputs from master to slave) - Based on your PDO_mapping.md
     uint32_t rxpdo_mapping[] = {
-        0x60400010,  // Controlword (16-bit)
-        0x60600008,  // Modes of operation (8-bit)
-        0x60710010,  // Target torque (16-bit)
-        0x607A0020,  // Target position (32-bit)
-        0x60FF0020,  // Target velocity (32-bit)
-        0x60B20010,  // Torque offset (16-bit)
-        0x27010020,  // Tuning command (32-bit)
-        0x60FE0120   // Physical outputs (32-bit)
+        0x60400010,  // 0x6040:0x00 Controlword (16-bit)
+        0x60600008,  // 0x6060:0x00 Modes of operation (8-bit)
+        0x60710010,  // 0x6071:0x00 Target torque (16-bit)
+        0x607A0020,  // 0x607A:0x00 Target position (32-bit)
+        0x60FF0020,  // 0x60FF:0x00 Target velocity (32-bit)
+        0x60B20010,  // 0x60B2:0x00 Torque offset (16-bit)
+        0x27010020,  // 0x2701:0x00 Tuning command (32-bit)
+        0x60FE0120   // 0x60FE:0x01 Physical outputs (32-bit)
     };
     
-    // Configure TxPDO (inputs from slave to master)
+    // Configure TxPDO (inputs from slave to master) - Based on your PDO_mapping.md
     uint32_t txpdo_mapping[] = {
-        0x60410010,  // Statusword (16-bit)
-        0x60610008,  // Modes of operation display (8-bit)
-        0x60640020,  // Position actual value (32-bit)
-        0x60690020,  // Velocity actual value (32-bit)
-        0x60770010,  // Torque actual value (16-bit)
-        0x60780010,  // Current actual value (16-bit)
-        0x60FD0120,  // Physical inputs (32-bit)
-        0x27020020   // Tuning status (32-bit)
+        0x60410010,  // 0x6041:0x00 Statusword (16-bit)
+        0x60610008,  // 0x6061:0x00 Modes of operation display (8-bit)
+        0x60640020,  // 0x6064:0x00 Position actual value (32-bit)
+        0x606C0020,  // 0x606C:0x00 Velocity actual value (32-bit) - Note: was 0x6069 in your code
+        0x60770010,  // 0x6077:0x00 Torque actual value (16-bit)
+        0x24010010,  // 0x2401:0x00 Analog input 1 (16-bit)
+        0x60FD0020,  // 0x60FD:0x00 Digital inputs (32-bit)
+        0x27020020   // 0x2702:0x00 Tuning status (32-bit)
     };
     
-    // Configure RxPDO mapping (0x1600)
-    if (soem_interface_configure_pdo_mapping(slave_idx, 0x1C00, 0x1600, 
+    // Configure RxPDO mapping (0x1600) - Use correct assignment index 0x1C12
+    printf("SOEM_Interface: Configuring RxPDO mapping...\n");
+    if (soem_interface_configure_pdo_mapping(slave_idx, 0x1C12, 0x1600, 
                                            rxpdo_mapping, sizeof(rxpdo_mapping)/sizeof(uint32_t)) != 0) {
         fprintf(stderr, "SOEM_Interface: Failed to configure RxPDO mapping.\n");
         return -1;
     }
     
-    // Configure TxPDO mapping (0x1A00)
-    if (soem_interface_configure_pdo_mapping(slave_idx, 0x1C01, 0x1A00, 
+    // Configure TxPDO mapping (0x1A00) - Use correct assignment index 0x1C13
+    printf("SOEM_Interface: Configuring TxPDO mapping...\n");
+    if (soem_interface_configure_pdo_mapping(slave_idx, 0x1C13, 0x1A00, 
                                            txpdo_mapping, sizeof(txpdo_mapping)/sizeof(uint32_t)) != 0) {
         fprintf(stderr, "SOEM_Interface: Failed to configure TxPDO mapping.\n");
         return -1;
     }
     
-    printf("SOEM_Interface: PDO mapping configuration completed.\n");
+    printf("SOEM_Interface: PDO mapping configuration completed successfully.\n");
     return 0;
 }
 
