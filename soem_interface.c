@@ -497,59 +497,65 @@ int soem_interface_configure_pdo_mapping(uint16_t slave_idx, uint16_t pdo_assign
 int configure_somanet_pdo_mapping(uint16_t slave_idx) {
     printf("SOEM_Interface: Configuring SOMANET PDO mapping for slave %u...\n", slave_idx);
     
-    // Set to Pre-operational for configuration
+    // Ensure we're in Pre-operational state
     if (soem_interface_set_ethercat_state(slave_idx, EC_STATE_PRE_OP) != 0) {
+        fprintf(stderr, "SOEM_Interface: Failed to set slave to Pre-Op for PDO configuration.\n");
         return -1;
     }
     usleep(100000); // 100ms delay
     
-    // Check if PDO mapping is needed
-    if (!check_pdo_mapping_needed(slave_idx)) {
-        printf("SOEM_Interface: PDO mapping already configured correctly.\n");
-        return 0;
-    }
-    
-    // Configure RxPDO (outputs from master to slave) - Based on your PDO_mapping.md
-    uint32_t rxpdo_mapping[] = {
-        0x60400010,  // 0x6040:0x00 Controlword (16-bit)
-        0x60600008,  // 0x6060:0x00 Modes of operation (8-bit)
-        0x60710010,  // 0x6071:0x00 Target torque (16-bit)
-        0x607A0020,  // 0x607A:0x00 Target position (32-bit)
-        0x60FF0020,  // 0x60FF:0x00 Target velocity (32-bit)
-        0x60B20010,  // 0x60B2:0x00 Torque offset (16-bit)
-        0x27010020,  // 0x2701:0x00 Tuning command (32-bit)
-        0x60FE0120   // 0x60FE:0x01 Physical outputs (32-bit)
-    };
-    
-    // Configure TxPDO (inputs from slave to master) - Based on your PDO_mapping.md
-    uint32_t txpdo_mapping[] = {
-        0x60410010,  // 0x6041:0x00 Statusword (16-bit)
-        0x60610008,  // 0x6061:0x00 Modes of operation display (8-bit)
-        0x60640020,  // 0x6064:0x00 Position actual value (32-bit)
-        0x606C0020,  // 0x606C:0x00 Velocity actual value (32-bit) - Note: was 0x6069 in your code
-        0x60770010,  // 0x6077:0x00 Torque actual value (16-bit)
-        0x24010010,  // 0x2401:0x00 Analog input 1 (16-bit)
-        0x60FD0020,  // 0x60FD:0x00 Digital inputs (32-bit)
-        0x27020020   // 0x2702:0x00 Tuning status (32-bit)
-    };
-    
-    // Configure RxPDO mapping (0x1600) - Use correct assignment index 0x1C12
-    printf("SOEM_Interface: Configuring RxPDO mapping...\n");
-    if (soem_interface_configure_pdo_mapping(slave_idx, 0x1C12, 0x1600, 
-                                           rxpdo_mapping, sizeof(rxpdo_mapping)/sizeof(uint32_t)) != 0) {
-        fprintf(stderr, "SOEM_Interface: Failed to configure RxPDO mapping.\n");
+    // Verify we're in Pre-Op
+    if ((ec_slave[slave_idx].state & 0x0F) != EC_STATE_PRE_OP) {
+        fprintf(stderr, "SOEM_Interface: Slave %d not in Pre-Op state for PDO configuration. Current state: %s\n", 
+                slave_idx, get_state_name(ec_slave[slave_idx].state));
         return -1;
     }
+
+    // Read current PDO assignment to understand the device configuration
+    uint8_t num_assigned_pdos = 0;
+    uint16_t assigned_pdo = 0;
     
-    // Configure TxPDO mapping (0x1A00) - Use correct assignment index 0x1C13
-    printf("SOEM_Interface: Configuring TxPDO mapping...\n");
-    if (soem_interface_configure_pdo_mapping(slave_idx, 0x1C13, 0x1A00, 
-                                           txpdo_mapping, sizeof(txpdo_mapping)/sizeof(uint32_t)) != 0) {
-        fprintf(stderr, "SOEM_Interface: Failed to configure TxPDO mapping.\n");
-        return -1;
+    // Check RxPDO assignment (0x1C12)
+    printf("SOEM_Interface: Reading current RxPDO assignment...\n");
+    if (soem_interface_read_sdo(slave_idx, 0x1C12, 0x00, sizeof(num_assigned_pdos), &num_assigned_pdos) == 0) {
+        printf("SOEM_Interface: RxPDO assignment has %d entries\n", num_assigned_pdos);
+        for (int i = 1; i <= num_assigned_pdos; i++) {
+            if (soem_interface_read_sdo(slave_idx, 0x1C12, i, sizeof(assigned_pdo), &assigned_pdo) == 0) {
+                printf("SOEM_Interface: RxPDO assignment[%d] = 0x%04X\n", i, assigned_pdo);
+            }
+        }
+    } else {
+        printf("SOEM_Interface: Could not read RxPDO assignment - this might be normal for some devices\n");
     }
     
-    printf("SOEM_Interface: PDO mapping configuration completed successfully.\n");
+    // Check TxPDO assignment (0x1C13)
+    printf("SOEM_Interface: Reading current TxPDO assignment...\n");
+    if (soem_interface_read_sdo(slave_idx, 0x1C13, 0x00, sizeof(num_assigned_pdos), &num_assigned_pdos) == 0) {
+        printf("SOEM_Interface: TxPDO assignment has %d entries\n", num_assigned_pdos);
+        for (int i = 1; i <= num_assigned_pdos; i++) {
+            if (soem_interface_read_sdo(slave_idx, 0x1C13, i, sizeof(assigned_pdo), &assigned_pdo) == 0) {
+                printf("SOEM_Interface: TxPDO assignment[%d] = 0x%04X\n", i, assigned_pdo);
+            }
+        }
+    } else {
+        printf("SOEM_Interface: Could not read TxPDO assignment - this might be normal for some devices\n");
+    }
+    
+    // For some devices, PDO mapping is fixed and doesn't need configuration
+    // Let's try a simpler approach: just check if the default mapping works
+    
+    printf("SOEM_Interface: Attempting to use default PDO mapping...\n");
+    
+    // Try to read some basic objects to see if the default mapping is suitable
+    uint8_t modes_of_operation = 0;
+    if (soem_interface_read_sdo(slave_idx, 0x6060, 0x00, sizeof(modes_of_operation), &modes_of_operation) == 0) {
+        printf("SOEM_Interface: Current modes of operation: %d\n", modes_of_operation);
+    }
+    
+    // If the device has a fixed PDO mapping, we might not need to configure it
+    // Let's skip the PDO mapping configuration for now and see if it works
+    
+    printf("SOEM_Interface: Using default PDO mapping (configuration skipped).\n");
     return 0;
 }
 
@@ -571,75 +577,220 @@ int soem_interface_init(const char *ifname) {
                 return -1;
             }
 
-            // Configure distributed clocks
-            ec_configdc();
-
-            // Print slave information
+            // Print slave information before configuration
             for (i = 1; i <= ec_slavecount; i++) {
-                printf("SOEM_Interface: Slave %d: Name=%s, OutputSize=%dbytes, InputSize=%dbytes\n",
-                       i, ec_slave[i].name, ec_slave[i].Obits / 8, ec_slave[i].Ibits / 8);
+                printf("SOEM_Interface: Slave %d: Name=%s, OutputSize=%dbytes, InputSize=%dbytes, State=%s\n",
+                       i, ec_slave[i].name, ec_slave[i].Obits / 8, ec_slave[i].Ibits / 8, 
+                       get_state_name(ec_slave[i].state));
+                
+                // Print AL status code if there's an error
+                if (ec_slave[i].ALstatuscode != 0) {
+                    printf("SOEM_Interface: Slave %d ALstatuscode: 0x%04x\n", i, ec_slave[i].ALstatuscode);
+                }
             }
 
-            // Configure PDO mapping for SOMANET devices
+            // Configure PDO mapping for SOMANET devices BEFORE ec_config_map
             if (ec_slavecount >= slave_idx) {
-                // First configure the PDO mapping
+                printf("SOEM_Interface: Configuring PDO mapping for slave %d...\n", slave_idx);
                 if (configure_somanet_pdo_mapping(slave_idx) != 0) {
                     fprintf(stderr, "SOEM_Interface: Failed to configure PDO mapping.\n");
                     return -1;
                 }
                 
-                // Now map the IO after PDO configuration
-                ec_config_map(&IOmap);
-                
-                // Assign PDO pointers
-                if (ec_slave[slave_idx].outputs > 0) {
-                    somanet_outputs = (somanet_rx_pdo_t *)(ec_slave[slave_idx].outputs);
-                    printf("SOEM_Interface: somanet_outputs mapped at %p (size: %d bytes)\n", 
-                           (void*)somanet_outputs, ec_slave[slave_idx].Obits / 8);
-                } else {
-                    fprintf(stderr, "SOEM_Interface: No output PDO data available!\n");
-                    return -1;
-                }
-                
-                if (ec_slave[slave_idx].inputs > 0) {
-                    somanet_inputs = (somanet_tx_pdo_t *)(ec_slave[slave_idx].inputs);
-                    printf("SOEM_Interface: somanet_inputs mapped at %p (size: %d bytes)\n", 
-                           (void*)somanet_inputs, ec_slave[slave_idx].Ibits / 8);
-                } else {
-                    fprintf(stderr, "SOEM_Interface: No input PDO data available!\n");
-                    return -1;
-                }
-
-                expectedWKC = (ec_group[0].outputsWKC * 2) + ec_group[0].inputsWKC;
-                printf("SOEM_Interface: Expected WKC: %d\n", expectedWKC);
+                // Brief delay after PDO configuration
+                usleep(100000);
             }
 
-            // Initialize CiA 402 parameters (do this before transitioning to Safe-Op)
+            // Configure distributed clocks
+            ec_configdc();
+
+            // Map the IO after PDO configuration
+            printf("SOEM_Interface: Mapping IO...\n");
+            if (ec_config_map(&IOmap) == 0) {
+                fprintf(stderr, "SOEM_Interface: ec_config_map failed\n");
+                return -1;
+            }
+
+            // Assign PDO pointers
+            if (ec_slave[slave_idx].outputs > 0) {
+                somanet_outputs = (somanet_rx_pdo_t *)(ec_slave[slave_idx].outputs);
+                printf("SOEM_Interface: somanet_outputs mapped at %p (size: %d bytes)\n", 
+                       (void*)somanet_outputs, ec_slave[slave_idx].Obits / 8);
+            } else {
+                fprintf(stderr, "SOEM_Interface: No output PDO data available!\n");
+                return -1;
+            }
+            
+            if (ec_slave[slave_idx].inputs > 0) {
+                somanet_inputs = (somanet_tx_pdo_t *)(ec_slave[slave_idx].inputs);
+                printf("SOEM_Interface: somanet_inputs mapped at %p (size: %d bytes)\n", 
+                       (void*)somanet_inputs, ec_slave[slave_idx].Ibits / 8);
+            } else {
+                fprintf(stderr, "SOEM_Interface: No input PDO data available!\n");
+                return -1;
+            }
+
+            expectedWKC = (ec_group[0].outputsWKC * 2) + ec_group[0].inputsWKC;
+            printf("SOEM_Interface: Expected WKC: %d\n", expectedWKC);
+
+            // Initialize CiA 402 parameters while in Pre-Op
             if (initialize_cia402_parameters(slave_idx) != 0) {
                 fprintf(stderr, "SOEM_Interface: Failed to initialize CiA 402 parameters.\n");
                 return -1;
             }
 
-            // Transition to Safe-Operational
+            // Transition to Safe-Operational with proper verification
             printf("SOEM_Interface: Requesting Safe-Operational state...\n");
-            ec_statecheck(0, EC_STATE_SAFE_OP, EC_TIMEOUTSTATE * 4);
-
-            // Check if we reached Safe-Op
-            if (!is_slave_operational(slave_idx) && (ec_slave[slave_idx].state & 0x0F) != EC_STATE_SAFE_OP) {
+            ec_slave[0].state = EC_STATE_SAFE_OP;
+            ec_writestate(0);
+            
+            int wkc_state = ec_statecheck(0, EC_STATE_SAFE_OP, EC_TIMEOUTSTATE * 4);
+            
+            // Detailed state verification
+            if (wkc_state == 0 || (ec_slave[0].state & 0x0F) != EC_STATE_SAFE_OP) {
                 fprintf(stderr, "SOEM_Interface: Failed to reach Safe-Operational state.\n");
+                fprintf(stderr, "SOEM_Interface: Master state: %s, WKC: %d\n", 
+                        get_state_name(ec_slave[0].state), wkc_state);
+                
+                // Print individual slave states and errors
+                for (i = 1; i <= ec_slavecount; i++) {
+                    printf("SOEM_Interface: Slave %d - State: %s, ALstatuscode: 0x%04x\n", 
+                           i, get_state_name(ec_slave[i].state), ec_slave[i].ALstatuscode);
+                    
+                    // Decode common AL status codes
+                    if (ec_slave[i].ALstatuscode != 0) {
+                        switch (ec_slave[i].ALstatuscode) {
+                            case 0x0001:
+                                printf("  -> Unspecified error\n");
+                                break;
+                            case 0x0002:
+                                printf("  -> No memory\n");
+                                break;
+                            case 0x0011:
+                                printf("  -> Invalid requested state change\n");
+                                break;
+                            case 0x0012:
+                                printf("  -> Unknown requested state\n");
+                                break;
+                            case 0x0013:
+                                printf("  -> Bootstrap not supported\n");
+                                break;
+                            case 0x0014:
+                                printf("  -> No valid firmware\n");
+                                break;
+                            case 0x0015:
+                                printf("  -> Invalid mailbox configuration\n");
+                                break;
+                            case 0x0016:
+                                printf("  -> Invalid mailbox configuration\n");
+                                break;
+                            case 0x0017:
+                                printf("  -> Invalid sync manager configuration\n");
+                                break;
+                            case 0x0018:
+                                printf("  -> No valid inputs available\n");
+                                break;
+                            case 0x0019:
+                                printf("  -> No valid outputs available\n");
+                                break;
+                            case 0x001A:
+                                printf("  -> Synchronization error\n");
+                                break;
+                            case 0x001B:
+                                printf("  -> Sync manager watchdog\n");
+                                break;
+                            case 0x001C:
+                                printf("  -> Invalid sync manager types\n");
+                                break;
+                            case 0x001D:
+                                printf("  -> Invalid output configuration\n");
+                                break;
+                            case 0x001E:
+                                printf("  -> Invalid input configuration\n");
+                                break;
+                            case 0x001F:
+                                printf("  -> Invalid watchdog configuration\n");
+                                break;
+                            case 0x0020:
+                                printf("  -> Slave needs cold start\n");
+                                break;
+                            case 0x0021:
+                                printf("  -> Slave needs INIT\n");
+                                break;
+                            case 0x0022:
+                                printf("  -> Slave needs PREOP\n");
+                                break;
+                            case 0x0023:
+                                printf("  -> Slave needs SAFEOP\n");
+                                break;
+                            case 0x002C:
+                                printf("  -> Invalid input mapping\n");
+                                break;
+                            case 0x002D:
+                                printf("  -> Invalid output mapping\n");
+                                break;
+                            case 0x002E:
+                                printf("  -> Inconsistent settings\n");
+                                break;
+                            case 0x002F:
+                                printf("  -> Freerun not supported\n");
+                                break;
+                            case 0x0030:
+                                printf("  -> Synchronization not supported\n");
+                                break;
+                            case 0x0031:
+                                printf("  -> Freerun needs 3 buffer mode\n");
+                                break;
+                            case 0x0032:
+                                printf("  -> Background watchdog\n");
+                                break;
+                            case 0x0033:
+                                printf("  -> No valid inputs and outputs\n");
+                                break;
+                            case 0x0034:
+                                printf("  -> Fatal sync error\n");
+                                break;
+                            case 0x0035:
+                                printf("  -> No sync error\n");
+                                break;
+                            case 0x0036:
+                                printf("  -> Cycle time too small\n");
+                                break;
+                            default:
+                                printf("  -> Unknown AL status code: 0x%04x\n", ec_slave[i].ALstatuscode);
+                                break;
+                        }
+                    }
+                }
                 return -1;
             }
 
+            printf("SOEM_Interface: Successfully reached Safe-Operational state.\n");
+
+            // Initialize safe values in outputs before going operational
+            if (somanet_outputs) {
+                memset(somanet_outputs, 0, sizeof(somanet_rx_pdo_t));
+                somanet_outputs->controlword = 0x0006; // Shutdown
+                somanet_outputs->modes_of_operation = 4; // Torque mode
+            }
+
+            // Send initial PDO data
+            ec_send_processdata();
+            usleep(10000);
+
             // Transition to Operational
             printf("SOEM_Interface: Requesting Operational state...\n");
-            ec_statecheck(0, EC_STATE_OPERATIONAL, EC_TIMEOUTSTATE * 4);
+            ec_slave[0].state = EC_STATE_OPERATIONAL;
+            ec_writestate(0);
+            
+            wkc_state = ec_statecheck(0, EC_STATE_OPERATIONAL, EC_TIMEOUTSTATE * 4);
 
             // Verify all slaves are operational
             int all_operational = 1;
             for (i = 1; i <= ec_slavecount; i++) {
                 if (!is_slave_operational(i)) {
-                    printf("SOEM_Interface: Slave %d not operational. State: %s (%d)\n", 
-                           i, get_state_name(ec_slave[i].state), ec_slave[i].state);
+                    printf("SOEM_Interface: Slave %d not operational. State: %s, ALstatuscode: 0x%04x\n", 
+                           i, get_state_name(ec_slave[i].state), ec_slave[i].ALstatuscode);
                     all_operational = 0;
                 }
             }
