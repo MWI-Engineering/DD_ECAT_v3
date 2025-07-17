@@ -525,7 +525,7 @@ int configure_somanet_pdo_mapping(uint16_t slave_idx) {
             }
         }
     } else {
-        printf("SOEM_Interface: Could not read RxPDO assignment - this might be normal for some devices\n");
+        printf("SOEM_Interface: Could not read RxPDO assignment - will configure manually\n");
     }
     
     // Check TxPDO assignment (0x1C13)
@@ -538,24 +538,45 @@ int configure_somanet_pdo_mapping(uint16_t slave_idx) {
             }
         }
     } else {
-        printf("SOEM_Interface: Could not read TxPDO assignment - this might be normal for some devices\n");
+        printf("SOEM_Interface: Could not read TxPDO assignment - will configure manually\n");
     }
     
-    // For some devices, PDO mapping is fixed and doesn't need configuration
-    // Let's try a simpler approach: just check if the default mapping works
+    // Since OutputSize=0, we need to actually configure the PDO mapping
+    printf("SOEM_Interface: Configuring PDO mapping manually...\n");
     
-    printf("SOEM_Interface: Attempting to use default PDO mapping...\n");
+    // Configure RxPDO (Master to Slave) - Use essential objects only
+    uint32_t rxpdo_mapping[] = {
+        0x60400010,  // 0x6040:0x00 Controlword (16-bit)
+        0x60600008,  // 0x6060:0x00 Modes of operation (8-bit)
+        0x60710010,  // 0x6071:0x00 Target torque (16-bit)
+        0x607A0020   // 0x607A:0x00 Target position (32-bit)
+    };
     
-    // Try to read some basic objects to see if the default mapping is suitable
-    uint8_t modes_of_operation = 0;
-    if (soem_interface_read_sdo(slave_idx, 0x6060, 0x00, sizeof(modes_of_operation), &modes_of_operation) == 0) {
-        printf("SOEM_Interface: Current modes of operation: %d\n", modes_of_operation);
+    // Configure TxPDO (Slave to Master) - Use essential objects only  
+    uint32_t txpdo_mapping[] = {
+        0x60410010,  // 0x6041:0x00 Statusword (16-bit)
+        0x60610008,  // 0x6061:0x00 Modes of operation display (8-bit)
+        0x60640020,  // 0x6064:0x00 Position actual value (32-bit)
+        0x606C0020   // 0x606C:0x00 Velocity actual value (32-bit)
+    };
+    
+    // Configure RxPDO mapping (0x1600)
+    printf("SOEM_Interface: Configuring RxPDO mapping...\n");
+    if (soem_interface_configure_pdo_mapping(slave_idx, 0x1C12, 0x1600, 
+                                           rxpdo_mapping, sizeof(rxpdo_mapping)/sizeof(uint32_t)) != 0) {
+        fprintf(stderr, "SOEM_Interface: Failed to configure RxPDO mapping.\n");
+        return -1;
     }
     
-    // If the device has a fixed PDO mapping, we might not need to configure it
-    // Let's skip the PDO mapping configuration for now and see if it works
+    // Configure TxPDO mapping (0x1A00)
+    printf("SOEM_Interface: Configuring TxPDO mapping...\n");
+    if (soem_interface_configure_pdo_mapping(slave_idx, 0x1C13, 0x1A00, 
+                                           txpdo_mapping, sizeof(txpdo_mapping)/sizeof(uint32_t)) != 0) {
+        fprintf(stderr, "SOEM_Interface: Failed to configure TxPDO mapping.\n");
+        return -1;
+    }
     
-    printf("SOEM_Interface: Using default PDO mapping (configuration skipped).\n");
+    printf("SOEM_Interface: PDO mapping configuration completed successfully.\n");
     return 0;
 }
 
