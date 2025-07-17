@@ -27,7 +27,7 @@
 #define CIA402_STATUSWORD_REMOTE        0x0200  // Remote
 #define CIA402_STATUSWORD_TARGET        0x0400  // Target reached
 #define CIA402_STATUSWORD_INTERNAL      0x0800  // Internal limit active
-
+// --- Controlwords
 #define CIA402_CONTROLWORD_SO           0x0001  // Switch on
 #define CIA402_CONTROLWORD_EV           0x0002  // Enable voltage
 #define CIA402_CONTROLWORD_QS           0x0004  // Quick stop
@@ -42,6 +42,7 @@ int wkc;
 int expectedWKC;
 ec_timet tmo;
 
+/*
 // --- PDO Structures for Synapticon ACTILINK-S (Slave 1) ---
 typedef struct PACKED
 {
@@ -67,6 +68,28 @@ typedef struct PACKED
     uint32 physical_inputs;             // 0x60FD:0x01
     uint32 tuning_status;               // 0x2702:0x00
 } somanet_tx_pdo_t;
+*/
+
+// Updated PDO structure definitions to match the enhanced mapping
+typedef struct PACKED
+{
+    uint16 controlword;         // 0x6040:0x00 (16-bit)
+    int8   modes_of_operation;  // 0x6060:0x00 (8-bit)
+    int16  target_torque;       // 0x6071:0x00 (16-bit)
+    int32  target_position;     // 0x607A:0x00 (32-bit)
+    int32  target_velocity;     // 0x60FF:0x00 (32-bit)
+    int16  torque_offset;       // 0x60B2:0x00 (16-bit)
+} somanet_rx_pdo_enhanced_t;
+
+typedef struct PACKED
+{
+    uint16 statusword;                  // 0x6041:0x00 (16-bit)
+    int8   modes_of_operation_display;  // 0x6061:0x00 (8-bit)
+    int32  position_actual_value;       // 0x6064:0x00 (32-bit)
+    int32  velocity_actual_value;       // 0x606C:0x00 (32-bit)
+    int16  torque_actual_value;         // 0x6077:0x00 (16-bit)
+    int16  current_actual_value;        // 0x6078:0x00 (16-bit)
+} somanet_tx_pdo_enhanced_t;
 
 // Pointers to the PDO data in the IOmap
 somanet_rx_pdo_t *somanet_outputs = NULL; // Initialize to NULL, remove if it causes errors
@@ -446,55 +469,165 @@ int check_pdo_mapping_needed(uint16_t slave_idx) {
     return 1; // For now, always configure - you can add logic to check if current mapping matches expected
 }
 
-// --- PDO Configuration Functions ---
-int soem_interface_configure_pdo_mapping(uint16_t slave_idx, uint16_t pdo_assign_idx, uint16_t pdo_map_idx, uint32_t *mapped_objects, uint8_t num_mapped_objects) {
+// Enhanced PDO mapping configuration with proper error handling and validation
+int soem_interface_configure_pdo_mapping_enhanced(uint16_t slave_idx, uint16_t pdo_assign_idx, 
+                                                  uint16_t pdo_map_idx, uint32_t *mapped_objects, 
+                                                  uint8_t num_mapped_objects) {
     uint8_t zero_val = 0;
     uint8_t original_assign_val = 1;
+    uint8_t current_num_objects = 0;
+    uint32_t current_object = 0;
     
-    printf("SOEM_Interface: Configuring PDO mapping for slave %u...\n", slave_idx);
+    printf("SOEM_Interface: Configuring PDO mapping for slave %u (PDO 0x%04X)...\n", slave_idx, pdo_map_idx);
 
-    // Set to Pre-operational
+    // Ensure we're in Pre-operational state as required by Synapticon
     if (soem_interface_set_ethercat_state(slave_idx, EC_STATE_PRE_OP) != 0) {
+        fprintf(stderr, "SOEM_Interface: Failed to set slave to Pre-Op for PDO configuration.\n");
         return -1;
     }
-    usleep(50000);
+    usleep(100000); // 100ms delay for state stabilization
 
-    // Disable PDO
+    // Step 1: Read current mapping to see if reconfiguration is needed
+    printf("SOEM_Interface: Reading current PDO mapping...\n");
+    if (soem_interface_read_sdo(slave_idx, pdo_map_idx, 0x00, sizeof(current_num_objects), &current_num_objects) == 0) {
+        printf("SOEM_Interface: Current mapping has %d objects\n", current_num_objects);
+        
+        // Check if current mapping matches desired mapping
+        bool mapping_matches = (current_num_objects == num_mapped_objects);
+        if (mapping_matches) {
+            for (uint8_t i = 0; i < current_num_objects; i++) {
+                if (soem_interface_read_sdo(slave_idx, pdo_map_idx, i + 1, sizeof(current_object), &current_object) == 0) {
+                    if (current_object != mapped_objects[i]) {
+                        mapping_matches = false;
+                        break;
+                    }
+                } else {
+                    mapping_matches = false;
+                    break;
+                }
+            }
+        }
+        
+        if (mapping_matches) {
+            printf("SOEM_Interface: Current PDO mapping already matches desired configuration.\n");
+            return 0; // No reconfiguration needed
+        }
+    }
+
+    // Step 2: Disable PDO assignment first (as per Synapticon documentation)
+    printf("SOEM_Interface: Disabling PDO assignment...\n");
     if (soem_interface_write_sdo(slave_idx, pdo_assign_idx, 0x00, sizeof(zero_val), &zero_val) != 0) {
+        fprintf(stderr, "SOEM_Interface: Failed to disable PDO assignment.\n");
         return -1;
     }
-    usleep(20000);
+    usleep(50000); // 50ms delay
 
-    // Clear mapping
+    // Step 3: Disable the PDO mapping object (set subindex 0 to 0)
+    printf("SOEM_Interface: Disabling PDO mapping object...\n");
     if (soem_interface_write_sdo(slave_idx, pdo_map_idx, 0x00, sizeof(zero_val), &zero_val) != 0) {
+        fprintf(stderr, "SOEM_Interface: Failed to disable PDO mapping.\n");
         return -1;
     }
-    usleep(20000);
+    usleep(50000); // 50ms delay
 
-    // Write new mapping
+    // Step 4: Write new mapping objects (subindices 1 to n)
+    printf("SOEM_Interface: Writing %d new mapping objects...\n", num_mapped_objects);
     for (uint8_t i = 0; i < num_mapped_objects; i++) {
+        printf("SOEM_Interface: Writing object %d: 0x%08X\n", i + 1, mapped_objects[i]);
         if (soem_interface_write_sdo(slave_idx, pdo_map_idx, i + 1, sizeof(uint32_t), &mapped_objects[i]) != 0) {
+            fprintf(stderr, "SOEM_Interface: Failed to write mapping object %d.\n", i + 1);
             return -1;
         }
-        usleep(5000);
+        usleep(20000); // 20ms delay between writes
     }
 
-    // Set number of mapped objects
+    // Step 5: Enable the PDO mapping by setting subindex 0 to number of objects
+    printf("SOEM_Interface: Enabling PDO mapping with %d objects...\n", num_mapped_objects);
     if (soem_interface_write_sdo(slave_idx, pdo_map_idx, 0x00, sizeof(num_mapped_objects), &num_mapped_objects) != 0) {
+        fprintf(stderr, "SOEM_Interface: Failed to enable PDO mapping.\n");
         return -1;
     }
-    usleep(20000);
+    usleep(50000); // 50ms delay
 
-    // Re-enable PDO
+    // Step 6: Re-enable PDO assignment
+    printf("SOEM_Interface: Re-enabling PDO assignment...\n");
     if (soem_interface_write_sdo(slave_idx, pdo_assign_idx, 0x00, sizeof(original_assign_val), &original_assign_val) != 0) {
+        fprintf(stderr, "SOEM_Interface: Failed to re-enable PDO assignment.\n");
         return -1;
     }
-    usleep(20000);
+    usleep(50000); // 50ms delay
+
+    // Step 7: Verify the configuration
+    printf("SOEM_Interface: Verifying PDO configuration...\n");
+    uint8_t verified_num_objects = 0;
+    if (soem_interface_read_sdo(slave_idx, pdo_map_idx, 0x00, sizeof(verified_num_objects), &verified_num_objects) == 0) {
+        if (verified_num_objects == num_mapped_objects) {
+            printf("SOEM_Interface: PDO mapping verification successful (%d objects).\n", verified_num_objects);
+        } else {
+            fprintf(stderr, "SOEM_Interface: PDO mapping verification failed. Expected %d, got %d objects.\n", 
+                    num_mapped_objects, verified_num_objects);
+            return -1;
+        }
+    } else {
+        fprintf(stderr, "SOEM_Interface: Failed to verify PDO mapping.\n");
+        return -1;
+    }
 
     return 0;
 }
 
-int configure_somanet_pdo_mapping(uint16_t slave_idx) {
+// Function to validate PDO configuration after mapping
+int validate_pdo_configuration(uint16_t slave_idx) {
+    printf("SOEM_Interface: Validating PDO configuration...\n");
+    
+    // Validate RxPDO configuration
+    uint8_t num_rx_objects = 0;
+    if (soem_interface_read_sdo(slave_idx, 0x1600, 0x00, sizeof(num_rx_objects), &num_rx_objects) == 0) {
+        printf("SOEM_Interface: RxPDO has %d mapped objects:\n", num_rx_objects);
+        for (int i = 1; i <= num_rx_objects; i++) {
+            uint32_t mapped_object = 0;
+            if (soem_interface_read_sdo(slave_idx, 0x1600, i, sizeof(mapped_object), &mapped_object) == 0) {
+                uint16_t index = (mapped_object >> 16) & 0xFFFF;
+                uint8_t subindex = (mapped_object >> 8) & 0xFF;
+                uint8_t bit_length = mapped_object & 0xFF;
+                printf("SOEM_Interface: RxPDO[%d]: 0x%04X:%02X (%d bits)\n", 
+                       i, index, subindex, bit_length);
+            }
+        }
+    }
+    
+    // Validate TxPDO configuration
+    uint8_t num_tx_objects = 0;
+    if (soem_interface_read_sdo(slave_idx, 0x1A00, 0x00, sizeof(num_tx_objects), &num_tx_objects) == 0) {
+        printf("SOEM_Interface: TxPDO has %d mapped objects:\n", num_tx_objects);
+        for (int i = 1; i <= num_tx_objects; i++) {
+            uint32_t mapped_object = 0;
+            if (soem_interface_read_sdo(slave_idx, 0x1A00, i, sizeof(mapped_object), &mapped_object) == 0) {
+                uint16_t index = (mapped_object >> 16) & 0xFFFF;
+                uint8_t subindex = (mapped_object >> 8) & 0xFF;
+                uint8_t bit_length = mapped_object & 0xFF;
+                printf("SOEM_Interface: TxPDO[%d]: 0x%04X:%02X (%d bits)\n", 
+                       i, index, subindex, bit_length);
+            }
+        }
+    }
+    
+    // Validate PDO assignments
+    uint8_t num_assigned_rx = 0;
+    if (soem_interface_read_sdo(slave_idx, 0x1C12, 0x00, sizeof(num_assigned_rx), &num_assigned_rx) == 0) {
+        printf("SOEM_Interface: RxPDO assignment has %d entries\n", num_assigned_rx);
+    }
+    
+    uint8_t num_assigned_tx = 0;
+    if (soem_interface_read_sdo(slave_idx, 0x1C13, 0x00, sizeof(num_assigned_tx), &num_assigned_tx) == 0) {
+        printf("SOEM_Interface: TxPDO assignment has %d entries\n", num_assigned_tx);
+    }
+    
+    return 0;
+}
+
+// Enhanced SOMANET PDO configuration with multiple mapping support
+int configure_somanet_pdo_mapping_enhanced(uint16_t slave_idx) {
     printf("SOEM_Interface: Configuring SOMANET PDO mapping for slave %u...\n", slave_idx);
     
     // Ensure we're in Pre-operational state
@@ -503,80 +636,93 @@ int configure_somanet_pdo_mapping(uint16_t slave_idx) {
         return -1;
     }
     usleep(100000); // 100ms delay
-    
-    // Verify we're in Pre-Op
-    if ((ec_slave[slave_idx].state & 0x0F) != EC_STATE_PRE_OP) {
-        fprintf(stderr, "SOEM_Interface: Slave %d not in Pre-Op state for PDO configuration. Current state: %s\n", 
-                slave_idx, get_state_name(ec_slave[slave_idx].state));
-        return -1;
-    }
 
-    // Read current PDO assignment to understand the device configuration
-    uint8_t num_assigned_pdos = 0;
+    // Check current PDO assignments to understand device configuration
+    uint8_t num_assigned_rxpdos = 0;
+    uint8_t num_assigned_txpdos = 0;
     uint16_t assigned_pdo = 0;
     
-    // Check RxPDO assignment (0x1C12)
-    printf("SOEM_Interface: Reading current RxPDO assignment...\n");
-    if (soem_interface_read_sdo(slave_idx, 0x1C12, 0x00, sizeof(num_assigned_pdos), &num_assigned_pdos) == 0) {
-        printf("SOEM_Interface: RxPDO assignment has %d entries\n", num_assigned_pdos);
-        for (int i = 1; i <= num_assigned_pdos; i++) {
+    // Read current RxPDO assignment (0x1C12)
+    printf("SOEM_Interface: Checking current RxPDO assignment...\n");
+    if (soem_interface_read_sdo(slave_idx, 0x1C12, 0x00, sizeof(num_assigned_rxpdos), &num_assigned_rxpdos) == 0) {
+        printf("SOEM_Interface: Current RxPDO assignment has %d entries\n", num_assigned_rxpdos);
+        for (int i = 1; i <= num_assigned_rxpdos; i++) {
             if (soem_interface_read_sdo(slave_idx, 0x1C12, i, sizeof(assigned_pdo), &assigned_pdo) == 0) {
                 printf("SOEM_Interface: RxPDO assignment[%d] = 0x%04X\n", i, assigned_pdo);
             }
         }
-    } else {
-        printf("SOEM_Interface: Could not read RxPDO assignment - will configure manually\n");
     }
     
-    // Check TxPDO assignment (0x1C13)
-    printf("SOEM_Interface: Reading current TxPDO assignment...\n");
-    if (soem_interface_read_sdo(slave_idx, 0x1C13, 0x00, sizeof(num_assigned_pdos), &num_assigned_pdos) == 0) {
-        printf("SOEM_Interface: TxPDO assignment has %d entries\n", num_assigned_pdos);
-        for (int i = 1; i <= num_assigned_pdos; i++) {
+    // Read current TxPDO assignment (0x1C13)
+    printf("SOEM_Interface: Checking current TxPDO assignment...\n");
+    if (soem_interface_read_sdo(slave_idx, 0x1C13, 0x00, sizeof(num_assigned_txpdos), &num_assigned_txpdos) == 0) {
+        printf("SOEM_Interface: Current TxPDO assignment has %d entries\n", num_assigned_txpdos);
+        for (int i = 1; i <= num_assigned_txpdos; i++) {
             if (soem_interface_read_sdo(slave_idx, 0x1C13, i, sizeof(assigned_pdo), &assigned_pdo) == 0) {
                 printf("SOEM_Interface: TxPDO assignment[%d] = 0x%04X\n", i, assigned_pdo);
             }
         }
-    } else {
-        printf("SOEM_Interface: Could not read TxPDO assignment - will configure manually\n");
     }
-    
-    // Since OutputSize=0, we need to actually configure the PDO mapping
-    printf("SOEM_Interface: Configuring PDO mapping manually...\n");
-    
-    // Configure RxPDO (Master to Slave) - Use essential objects only
+
+    // Define optimized PDO mapping for ACTILINK-S
+    // RxPDO (Master to Slave) - Essential control objects
     uint32_t rxpdo_mapping[] = {
         0x60400010,  // 0x6040:0x00 Controlword (16-bit)
         0x60600008,  // 0x6060:0x00 Modes of operation (8-bit)
         0x60710010,  // 0x6071:0x00 Target torque (16-bit)
-        0x607A0020   // 0x607A:0x00 Target position (32-bit)
+        0x607A0020,  // 0x607A:0x00 Target position (32-bit)
+        0x60FF0020,  // 0x60FF:0x00 Target velocity (32-bit)
+        0x60B20010   // 0x60B2:0x00 Torque offset (16-bit)
     };
     
-    // Configure TxPDO (Slave to Master) - Use essential objects only  
+    // TxPDO (Slave to Master) - Essential feedback objects
     uint32_t txpdo_mapping[] = {
         0x60410010,  // 0x6041:0x00 Statusword (16-bit)
         0x60610008,  // 0x6061:0x00 Modes of operation display (8-bit)
         0x60640020,  // 0x6064:0x00 Position actual value (32-bit)
-        0x606C0020   // 0x606C:0x00 Velocity actual value (32-bit)
+        0x606C0020,  // 0x606C:0x00 Velocity actual value (32-bit)
+        0x60770010,  // 0x6077:0x00 Torque actual value (16-bit)
+        0x60780010   // 0x6078:0x00 Current actual value (16-bit)
     };
+
+    // Calculate total PDO sizes and verify they're within limits
+    uint16_t rxpdo_size_bits = 0;
+    uint16_t txpdo_size_bits = 0;
     
+    for (int i = 0; i < sizeof(rxpdo_mapping)/sizeof(uint32_t); i++) {
+        rxpdo_size_bits += (rxpdo_mapping[i] & 0xFF);
+    }
+    
+    for (int i = 0; i < sizeof(txpdo_mapping)/sizeof(uint32_t); i++) {
+        txpdo_size_bits += (txpdo_mapping[i] & 0xFF);
+    }
+    
+    printf("SOEM_Interface: RxPDO size: %d bits (%d bytes)\n", rxpdo_size_bits, rxpdo_size_bits/8);
+    printf("SOEM_Interface: TxPDO size: %d bits (%d bytes)\n", txpdo_size_bits, txpdo_size_bits/8);
+    
+    // Check SyncManager size limitations (100 bytes per direction)
+    if (rxpdo_size_bits/8 > 100 || txpdo_size_bits/8 > 100) {
+        fprintf(stderr, "SOEM_Interface: PDO mapping exceeds SyncManager size limits (100 bytes per direction).\n");
+        return -1;
+    }
+
     // Configure RxPDO mapping (0x1600)
-    printf("SOEM_Interface: Configuring RxPDO mapping...\n");
-    if (soem_interface_configure_pdo_mapping(slave_idx, 0x1C12, 0x1600, 
-                                           rxpdo_mapping, sizeof(rxpdo_mapping)/sizeof(uint32_t)) != 0) {
+    printf("SOEM_Interface: Configuring RxPDO mapping (0x1600)...\n");
+    if (soem_interface_configure_pdo_mapping_enhanced(slave_idx, 0x1C12, 0x1600, 
+                                                     rxpdo_mapping, sizeof(rxpdo_mapping)/sizeof(uint32_t)) != 0) {
         fprintf(stderr, "SOEM_Interface: Failed to configure RxPDO mapping.\n");
         return -1;
     }
     
     // Configure TxPDO mapping (0x1A00)
-    printf("SOEM_Interface: Configuring TxPDO mapping...\n");
-    if (soem_interface_configure_pdo_mapping(slave_idx, 0x1C13, 0x1A00, 
-                                           txpdo_mapping, sizeof(txpdo_mapping)/sizeof(uint32_t)) != 0) {
+    printf("SOEM_Interface: Configuring TxPDO mapping (0x1A00)...\n");
+    if (soem_interface_configure_pdo_mapping_enhanced(slave_idx, 0x1C13, 0x1A00, 
+                                                     txpdo_mapping, sizeof(txpdo_mapping)/sizeof(uint32_t)) != 0) {
         fprintf(stderr, "SOEM_Interface: Failed to configure TxPDO mapping.\n");
         return -1;
     }
-    
-    printf("SOEM_Interface: PDO mapping configuration completed successfully.\n");
+
+    printf("SOEM_Interface: Enhanced PDO mapping configuration completed successfully.\n");
     return 0;
 }
 
@@ -613,13 +759,19 @@ int soem_interface_init(const char *ifname) {
             // Configure PDO mapping for SOMANET devices BEFORE ec_config_map
             if (ec_slavecount >= slave_idx) {
                 printf("SOEM_Interface: Configuring PDO mapping for slave %d...\n", slave_idx);
-                if (configure_somanet_pdo_mapping(slave_idx) != 0) {
-                    fprintf(stderr, "SOEM_Interface: Failed to configure PDO mapping.\n");
-                    return -1;
-                }
+                    if (configure_somanet_pdo_mapping_enhanced(slave_idx) != 0) {
+                        fprintf(stderr, "SOEM_Interface: Failed to configure PDO mapping.\n");
+                        return -1;
+                        }
                 
                 // Brief delay after PDO configuration
                 usleep(100000);
+            }
+
+            // Add validation after configuration:
+            if (validate_pdo_configuration(slave_idx) != 0) {
+                fprintf(stderr, "SOEM_Interface: PDO configuration validation failed.\n");
+            return -1;
             }
 
             // Configure distributed clocks
