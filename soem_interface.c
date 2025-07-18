@@ -88,8 +88,8 @@ typedef struct PACKED
 } somanet_tx_pdo_enhanced_t;
 */
 // Pointers to the PDO data in the IOmap
-somanet_rx_pdo_enhanced_t *somanet_outputs = NULL; // Initialize to NULL, remove if it causes errors
-somanet_tx_pdo_enhanced_t *somanet_inputs = NULL; // Initialize to NULL, remove if it causes errors
+somanet_rx_pdo_enhanced_t *somanet_outputs; // Initialize to NULL, remove if it causes errors
+somanet_tx_pdo_enhanced_t *somanet_inputs; // Initialize to NULL, remove if it causes errors
 
 // Mutex for protecting PDO data access
 static pthread_mutex_t pdo_mutex = PTHREAD_MUTEX_INITIALIZER;
