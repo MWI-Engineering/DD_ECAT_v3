@@ -866,9 +866,8 @@ int configure_somanet_pdo_mapping_enhanced(uint16_t slave_idx, uint16_t pdo_assi
         0x60400010,  // Controlword (16 bits)
         0x60600008,  // Modes of operation (8 bits)
         0x60710010   // Target Torque (16 bits)
-        // Removed: Target position, Target velocity, Torque offset, Tuning command, Physical outputs, Bit mask, User MOSI, Velocity offset
     };
-    
+
     // Define the full TxPDO mapping based on PDO_mapping.md (SM3 inputs)
     uint32_t txpdo_mapping[] = {
         0x60410010,  // Statusword (16 bits)
@@ -876,7 +875,6 @@ int configure_somanet_pdo_mapping_enhanced(uint16_t slave_idx, uint16_t pdo_assi
         0x60640020,  // Position actual value (32 bits)
         0x606C0020,  // Velocity actual value (32 bits)
         0x60770010   // Torque actual value (16 bits)
-        // Removed: Analog inputs, Tuning status, Digital inputs, User MISO, Timestamp, Position demand internal value, Velocity demand value, Torque demand
     };
     
     // Calculate and verify sizes (for logging purposes)
