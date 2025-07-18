@@ -46,6 +46,7 @@ ec_timet tmo;
 // --- PDO Structures for Synapticon ACTILINK-S (Slave 1) ---
 // These structures define the expected PDO layout based on PDO_mapping.md.
 // They are crucial for correct data alignment and size matching with the EtherCAT slave.
+/*
 typedef struct PACKED
 {
     uint16 controlword;         // 0x6040:0x00 (16 bits)
@@ -80,6 +81,7 @@ typedef struct PACKED
     int32  velocity_demand_value;       // 0x606B:0x00 (32 bits)
     int16  torque_demand;               // 0x6074:0x00 (16 bits)
 } somanet_tx_pdo_enhanced_t; // Total size: 2+1+4+4+2+2+2+2+2+4+4+4+4+4+4+2 = 47 bytes (376 bits)
+*/
 
 // Pointers to the PDO data in the IOmap
 somanet_rx_pdo_enhanced_t *somanet_outputs;
