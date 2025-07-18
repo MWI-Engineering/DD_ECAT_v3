@@ -92,8 +92,8 @@ typedef struct PACKED
 } somanet_tx_pdo_enhanced_t;
 
 // Pointers to the PDO data in the IOmap
-somanet_rx_pdo_t *somanet_outputs = NULL; // Initialize to NULL, remove if it causes errors
-somanet_tx_pdo_t *somanet_inputs = NULL; // Initialize to NULL, remove if it causes errors
+somanet_rx_pdo_enhanced_t *somanet_outputs = NULL; // Initialize to NULL, remove if it causes errors
+somanet_tx_pdo_enhanced_t *somanet_inputs = NULL; // Initialize to NULL, remove if it causes errors
 
 // Mutex for protecting PDO data access
 static pthread_mutex_t pdo_mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -768,7 +768,7 @@ int soem_interface_init(const char *ifname) {
                 usleep(100000);
             }
 
-            // Add validation after configuration:
+            // Validation after PDO configuration:
             if (validate_pdo_configuration(slave_idx) != 0) {
                 fprintf(stderr, "SOEM_Interface: PDO configuration validation failed.\n");
             return -1;
@@ -786,7 +786,7 @@ int soem_interface_init(const char *ifname) {
 
             // Assign PDO pointers
             if (ec_slave[slave_idx].outputs > 0) {
-                somanet_outputs = (somanet_rx_pdo_t *)(ec_slave[slave_idx].outputs);
+                somanet_outputs = (somanet_rx_pdo_enhanced_t *)(ec_slave[slave_idx].outputs);
                 printf("SOEM_Interface: somanet_outputs mapped at %p (size: %d bytes)\n", 
                        (void*)somanet_outputs, ec_slave[slave_idx].Obits / 8);
             } else {
@@ -795,7 +795,7 @@ int soem_interface_init(const char *ifname) {
             }
             
             if (ec_slave[slave_idx].inputs > 0) {
-                somanet_inputs = (somanet_tx_pdo_t *)(ec_slave[slave_idx].inputs);
+                somanet_inputs = (somanet_tx_pdo_enhanced_t *)(ec_slave[slave_idx].inputs);
                 printf("SOEM_Interface: somanet_inputs mapped at %p (size: %d bytes)\n", 
                        (void*)somanet_inputs, ec_slave[slave_idx].Ibits / 8);
             } else {
@@ -942,7 +942,7 @@ int soem_interface_init(const char *ifname) {
 
             // Initialize safe values in outputs before going operational
             if (somanet_outputs) {
-                memset(somanet_outputs, 0, sizeof(somanet_rx_pdo_t));
+                memset(somanet_outputs, 0, sizeof(somanet_rx_pdo_enhanced_t));
                 somanet_outputs->controlword = 0x0006; // Shutdown
                 somanet_outputs->modes_of_operation = 4; // Torque mode
             }
