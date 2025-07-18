@@ -38,6 +38,7 @@
 
 // --- SOEM Global Variables ---
 char IOmap[4096];
+OSAL_THREAD_HANDLE thread1;
 ec_ODlistt ODlist;
 ec_groupt DCgroup;
 int wkc;
@@ -303,10 +304,10 @@ int soem_interface_set_ethercat_state(uint16_t slave_idx, ec_state desired_state
         ec_writestate(slave_idx);
         
         // Wait longer for state transition
-        usleep(200000); // 200ms delay
+        usleep(20000); // 20ms delay
         
         // Check the state with extended timeout
-        int wkc_state = ec_statecheck(slave_idx, desired_state, EC_TIMEOUTSTATE * 2);
+        int wkc_state = ec_statecheck(slave_idx, desired_state, EC_TIMEOUTSTATE);
         
         if (wkc_state > 0 && (ec_slave[slave_idx].state & 0x0F) == desired_state) {
             printf("SOEM_Interface: Slave %u successfully transitioned to state %s\n", 
@@ -344,7 +345,7 @@ int soem_interface_set_ethercat_state(uint16_t slave_idx, ec_state desired_state
         retry_count++;
         if (retry_count < max_retries) {
             printf("SOEM_Interface: Retrying in 500ms...\n");
-            usleep(500000); // 500ms delay before retry
+            usleep(50000); // 50ms delay before retry
         }
     }
     
@@ -418,7 +419,7 @@ int perform_cia402_transition_to_operational(uint16_t slave_idx) {
         printf("SOEM_Interface: Applied controlword: 0x%04X\n", current_controlword);
         
         attempt++;
-        usleep(100000); // 100ms delay between attempts
+        usleep(5000); // 5ms delay between attempts
     }
     
     fprintf(stderr, "SOEM_Interface: Failed to reach operational state after %d attempts.\n", max_attempts);
@@ -468,7 +469,7 @@ void *ecat_loop(void *ptr) {
             printf("Working counter too low: %d < %d\n", wkc, expectedWKC);
         }
         
-        usleep(1000); // 1ms cycle time - well within watchdog timeout
+        usleep(5000); // 5ms cycle time - well within watchdog timeout
 
         if (wkc >= expectedWKC) {
             communication_ok = 1;
@@ -958,7 +959,7 @@ void soem_interface_stop_master() {
         }
         ec_send_processdata();
         
-        usleep(100000); // Wait 100ms
+        usleep(10000); // Wait 10ms
 
         // Transition to Safe-Op then Init
         soem_interface_set_ethercat_state(0, EC_STATE_SAFE_OP);
