@@ -444,6 +444,12 @@ void *ecat_loop(void *ptr) {
         ec_send_processdata();
         wkc = ec_receive_processdata(EC_TIMEOUTRET);
 
+        if (wkc < expectedWKC) {
+            printf("Working counter too low: %d < %d\n", wkc, expectedWKC);
+        }
+        
+        usleep(1000); // 1ms cycle time - well within watchdog timeout
+
         if (wkc >= expectedWKC) {
             communication_ok = 1;
             
@@ -675,6 +681,9 @@ int validate_pdo_configuration(uint16_t slave_idx) {
 int configure_somanet_pdo_mapping_enhanced(uint16_t slave_idx) {
      printf("SOEM_Interface: Starting robust PDO mapping configuration for slave %u...\n", slave_idx);
     
+    //For debugging
+    ec_slave[slave_idx].SM[2].SMlength = 0;  // Disable SM2 watchdog
+
     // First, ensure we're in INIT state for clean configuration
     if (soem_interface_set_ethercat_state(slave_idx, EC_STATE_INIT) != 0) {
         fprintf(stderr, "SOEM_Interface: Failed to set slave to INIT state\n");
