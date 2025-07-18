@@ -43,7 +43,6 @@ int wkc;
 int expectedWKC;
 ec_timet tmo;
 
-/*
 // --- PDO Structures for Synapticon ACTILINK-S (Slave 1) ---
 typedef struct PACKED
 {
@@ -56,7 +55,7 @@ typedef struct PACKED
     uint32 tuning_command;      // 0x2701:0x00
     uint32 physical_outputs;    // 0x60FE:0x01
     uint32 bit_mask;            // Padding for alignment
-} somanet_rx_pdo_t;
+} somanet_rx_pdo_enhanced_t;
 
 typedef struct PACKED
 {
@@ -68,9 +67,9 @@ typedef struct PACKED
     int16  current_actual_value;        // 0x6078:0x00
     uint32 physical_inputs;             // 0x60FD:0x01
     uint32 tuning_status;               // 0x2702:0x00
-} somanet_tx_pdo_t;
-*/
+} somanet_tx_pdo_enhanced_t;
 
+/*
 // Updated PDO structure definitions to match the enhanced mapping
 typedef struct PACKED
 {
@@ -87,7 +86,7 @@ typedef struct PACKED
     int32  position_actual_value;       // 0x6064:0x00 (32-bit) = 4 bytes
     int16  torque_actual_value;         // 0x6077:0x00 (16-bit) = 2 bytes
 } somanet_tx_pdo_enhanced_t;
-
+*/
 // Pointers to the PDO data in the IOmap
 somanet_rx_pdo_enhanced_t *somanet_outputs = NULL; // Initialize to NULL, remove if it causes errors
 somanet_tx_pdo_enhanced_t *somanet_inputs = NULL; // Initialize to NULL, remove if it causes errors
