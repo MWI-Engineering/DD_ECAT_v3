@@ -50,7 +50,7 @@ typedef struct PACKED
     int8   modes_of_operation;  // 0x6060:0x00
     int16  target_torque;       // 0x6071:0x00
     int32  target_position;     // 0x607A:0x00
-    int32  target_velocity;     // 0x60FF:0x00
+    //int32  target_velocity;     // 0x60FF:0x00
     //int16  torque_offset;       // 0x60B2:0x00
     //uint32 tuning_command;      // 0x2701:0x00
     //uint32 physical_outputs;    // 0x60FE:0x01
