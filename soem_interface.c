@@ -864,7 +864,7 @@ int soem_interface_init_enhanced(const char *ifname) {
     for (int wd_cycles = 0; wd_cycles < 10; wd_cycles++) {
         ec_send_processdata();
         ec_receive_processdata(EC_TIMEOUTRET);
-        usleep(5000); // 5ms between cycles
+        usleep(1000); // 1ms between cycles
     }
 
     // Transition to Operational with enhanced function
