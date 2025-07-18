@@ -729,18 +729,8 @@ int configure_somanet_pdo_mapping_enhanced(uint16_t slave_idx) {
         0x60610008,  // Modes of operation display (8 bits)
         0x60640020,  // Position actual value (32 bits)
         0x606C0020,  // Velocity actual value (32 bits)
-        0x60770010,  // Torque actual value (16 bits)
-        0x24010010,  // Analog input 1 (16 bits)
-        0x24020010,  // Analog input 2 (16 bits)
-        0x24030010,  // Analog input 3 (16 bits)
-        0x24040010,  // Analog input 4 (16 bits)
-        0x27020020,  // Tuning status (32 bits)
-        0x60FD0020,  // Digital inputs (32 bits)
-        0x27040020,  // User MISO (32 bits)
-        0x20F00020,  // Timestamp (32 bits)
-        0x60FC0020,  // Position demand internal value (32 bits)
-        0x606B0020,  // Velocity demand value (32 bits)
-        0x60740010   // Torque demand (16 bits)
+        0x60770010   // Torque actual value (16 bits)
+        // Removed: Analog inputs, Tuning status, Digital inputs, User MISO, Timestamp, Position demand internal value, Velocity demand value, Torque demand
     };
     
     // Calculate and verify sizes (for logging purposes)
