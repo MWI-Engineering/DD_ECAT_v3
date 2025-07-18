@@ -52,6 +52,23 @@ ec_timet tmo;
 somanet_rx_pdo_enhanced_t *somanet_outputs;
 somanet_tx_pdo_enhanced_t *somanet_inputs;
 
+// Global PDO mapping arrays
+// Define the full RxPDO mapping based on PDO_mapping.md (SM2 outputs)
+uint32_t rxpdo_mapping[] = {
+    0x60400010,  // Controlword (16 bits)
+    0x60600008,  // Modes of operation (8 bits)
+    0x60710010   // Target Torque (16 bits)
+};
+
+// Define the full TxPDO mapping based on PDO_mapping.md (SM3 inputs)
+uint32_t txpdo_mapping[] = {
+    0x60410010,  // Statusword (16 bits)
+    0x60610008,  // Modes of operation display (8 bits)
+    0x60640020,  // Position actual value (32 bits)
+    0x606C0020,  // Velocity actual value (32 bits)
+    0x60770010   // Torque actual value (16 bits)
+};
+
 // Mutex for protecting PDO data access
 static pthread_mutex_t pdo_mutex = PTHREAD_MUTEX_INITIALIZER;
 
@@ -859,23 +876,6 @@ int configure_somanet_pdo_mapping_enhanced(uint16_t slave_idx, uint16_t pdo_assi
         printf("SOEM_Interface: Device may not support PDO assignment modification, using default mapping\n");
         return 0; // Continue with default mapping
     }
-    
-    // Define the full RxPDO mapping based on PDO_mapping.md (SM2 outputs)
-    // REDUCED FOR DEBUGGING: Only essential objects for basic control
-    uint32_t rxpdo_mapping[] = {
-        0x60400010,  // Controlword (16 bits)
-        0x60600008,  // Modes of operation (8 bits)
-        0x60710010   // Target Torque (16 bits)
-    };
-
-    // Define the full TxPDO mapping based on PDO_mapping.md (SM3 inputs)
-    uint32_t txpdo_mapping[] = {
-        0x60410010,  // Statusword (16 bits)
-        0x60610008,  // Modes of operation display (8 bits)
-        0x60640020,  // Position actual value (32 bits)
-        0x606C0020,  // Velocity actual value (32 bits)
-        0x60770010   // Torque actual value (16 bits)
-    };
     
     // Calculate and verify sizes (for logging purposes)
     uint16_t rxpdo_size_bits = 0;
