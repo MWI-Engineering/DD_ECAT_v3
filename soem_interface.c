@@ -718,8 +718,8 @@ int configure_somanet_pdo_mapping_enhanced(uint16_t slave_idx) {
     // REDUCED FOR DEBUGGING: Only essential objects for basic control
     uint32_t rxpdo_mapping[] = {
         0x60400010,  // Controlword (16 bits)
-        //0x60600008,  // Modes of operation (8 bits)
-        //0x60710010   // Target Torque (16 bits)
+        0x60600008,  // Modes of operation (8 bits)
+        0x60710010   // Target Torque (16 bits)
         // Removed: Target position, Target velocity, Torque offset, Tuning command, Physical outputs, Bit mask, User MOSI, Velocity offset
     };
     
