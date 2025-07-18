@@ -88,8 +88,8 @@ int main(int argc, char *argv[]) {
     }
 
     printf("Initializing EtherCAT master on interface %s...\n", ethercat_ifname);
-    // Function call from soem_interface_init_master to soem_interface_init
-    if (soem_interface_init(ethercat_ifname) != 0) {
+    // Function call from soem_interface_init_master to soem_interface_init_enhanced
+    if (soem_interface_init_enhanced(ethercat_ifname) != 0) {
         fprintf(stderr, "Failed to initialize EtherCAT master. Exiting.\n");
         //soem_interface_stop_master();
         hid_interface_stop();
