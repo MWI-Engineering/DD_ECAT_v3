@@ -453,7 +453,7 @@ void *ecat_loop(void *ptr) {
                 current_statusword = somanet_inputs->statusword;
                 current_cia402_state = get_cia402_state(current_statusword);
                 current_position_f = (float)somanet_inputs->position_actual_value;
-                //current_velocity_f = (float)somanet_inputs->velocity_actual_value;
+                current_velocity_f = (float)somanet_inputs->velocity_actual_value;
             }
             pthread_mutex_unlock(&pdo_mutex);
             
@@ -735,8 +735,11 @@ int configure_somanet_pdo_mapping_enhanced(uint16_t slave_idx) {
 int soem_interface_init_enhanced(const char *ifname) {
     int i;
     int slave_idx = 1;
+    const int target_pdo_bits = 13;  // Target PDO size in bits
+    const int target_pdo_bytes = (target_pdo_bits + 7) / 8;  // Convert to bytes (ceiling division)
 
     printf("SOEM_Interface: Enhanced initialization starting on %s...\n", ifname);
+    printf("SOEM_Interface: Target PDO size: %d bits (%d bytes)\n", target_pdo_bits, target_pdo_bytes);
 
     if (!ec_init(ifname)) {
         fprintf(stderr, "SOEM_Interface: ec_init failed on %s\n", ifname);
@@ -790,15 +793,16 @@ int soem_interface_init_enhanced(const char *ifname) {
                i, ec_slave[i].Obits/8, ec_slave[i].Ibits/8);
     }
 
-    // Assign PDO pointers with size validation
+    // Assign PDO pointers with 13-bit size validation
     if (ec_slave[slave_idx].outputs > 0) {
         int output_size = ec_slave[slave_idx].Obits / 8;
-        if (output_size >= sizeof(somanet_rx_pdo_enhanced_t)) {
+        if (output_size >= target_pdo_bytes) {
             somanet_outputs = (somanet_rx_pdo_enhanced_t *)(ec_slave[slave_idx].outputs);
-            printf("SOEM_Interface: somanet_outputs mapped successfully (%d bytes available)\n", output_size);
+            printf("SOEM_Interface: somanet_outputs mapped successfully (%d bytes available, %d bits)\n", 
+                   output_size, ec_slave[slave_idx].Obits);
         } else {
-            fprintf(stderr, "SOEM_Interface: Output PDO size mismatch: need %zu bytes, have %d bytes\n",
-                    sizeof(somanet_rx_pdo_enhanced_t), output_size);
+            fprintf(stderr, "SOEM_Interface: Output PDO size mismatch: need %d bytes (%d bits), have %d bytes (%d bits)\n",
+                    target_pdo_bytes, target_pdo_bits, output_size, ec_slave[slave_idx].Obits);
             return -1;
         }
     } else {
@@ -808,12 +812,13 @@ int soem_interface_init_enhanced(const char *ifname) {
     
     if (ec_slave[slave_idx].inputs > 0) {
         int input_size = ec_slave[slave_idx].Ibits / 8;
-        if (input_size >= sizeof(somanet_tx_pdo_enhanced_t)) {
+        if (input_size >= target_pdo_bytes) {
             somanet_inputs = (somanet_tx_pdo_enhanced_t *)(ec_slave[slave_idx].inputs);
-            printf("SOEM_Interface: somanet_inputs mapped successfully (%d bytes available)\n", input_size);
+            printf("SOEM_Interface: somanet_inputs mapped successfully (%d bytes available, %d bits)\n", 
+                   input_size, ec_slave[slave_idx].Ibits);
         } else {
-            fprintf(stderr, "SOEM_Interface: Input PDO size mismatch: need %zu bytes, have %d bytes\n",
-                    sizeof(somanet_tx_pdo_enhanced_t), input_size);
+            fprintf(stderr, "SOEM_Interface: Input PDO size mismatch: need %d bytes (%d bits), have %d bytes (%d bits)\n",
+                    target_pdo_bytes, target_pdo_bits, input_size, ec_slave[slave_idx].Ibits);
             return -1;
         }
     } else {
@@ -831,7 +836,7 @@ int soem_interface_init_enhanced(const char *ifname) {
     
     // Initialize safe values
     if (somanet_outputs) {
-        memset(somanet_outputs, 0, sizeof(somanet_rx_pdo_enhanced_t));
+        memset(somanet_outputs, 0, target_pdo_bytes);  // Clear only the target PDO size
         somanet_outputs->controlword = 0x0006; // Shutdown
         somanet_outputs->modes_of_operation = 4; // Torque mode
     }
@@ -890,7 +895,7 @@ float soem_interface_get_current_position() {
     pthread_mutex_unlock(&pdo_mutex);
     return position;
 }
-/*
+
 float soem_interface_get_current_velocity() {
     float velocity;
     pthread_mutex_lock(&pdo_mutex);
@@ -898,7 +903,7 @@ float soem_interface_get_current_velocity() {
     pthread_mutex_unlock(&pdo_mutex);
     return velocity;
 }
-*/
+
 int soem_interface_get_communication_status() {
     return communication_ok;
 }
