@@ -945,9 +945,10 @@ int soem_interface_init_enhanced(const char *ifname) {
     }
 
     // Configure PDO mapping with improved robustness
-    if (configure_somanet_pdo_mapping_enhanced(slave_idx) != 0) {
-        fprintf(stderr, "SOEM_Interface: Critical: PDO mapping configuration failed, cannot proceed.\n");
-        return -1;
+    if (soem_interface_configure_pdo_mapping_enhanced(slave_idx, 0x1C12, 0x1600, 
+                                                     rxpdo_mapping, sizeof(rxpdo_mapping)/sizeof(uint32_t)) != 0) {
+        fprintf(stderr, "SOEM_Interface: RxPDO mapping failed, cannot proceed.\n");
+        return -1; // Critical error, cannot continue without correct RxPDO
     }
 
     // Configure distributed clocks
