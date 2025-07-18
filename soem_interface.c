@@ -802,7 +802,7 @@ int soem_interface_init_enhanced(const char *ifname) {
 
     // Assign PDO pointers with 13-bit size validation
     if (ec_slave[slave_idx].outputs > 0) {
-        int output_size = ec_slave[slave_idx].Obits; // 8; for testing
+        int output_size = ec_slave[slave_idx].Obits;
         if (output_size >= target_pdo_bytes) {
             somanet_outputs = (somanet_rx_pdo_enhanced_t *)(ec_slave[slave_idx].outputs);
             printf("SOEM_Interface: somanet_outputs mapped successfully (%d bytes available, %d bits)\n", 
@@ -843,7 +843,7 @@ int soem_interface_init_enhanced(const char *ifname) {
     
     // Initialize safe values
     if (somanet_outputs) {
-        memset(somanet_outputs, 0, target_pdo_bytes);  // Clear only the target PDO size
+        memset(somanet_outputs, 0, f);  // Clear only the target PDO size
         somanet_outputs->controlword = 0x0006; // Shutdown
         somanet_outputs->modes_of_operation = 4; // Torque mode
     }
