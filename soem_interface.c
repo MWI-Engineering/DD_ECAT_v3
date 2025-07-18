@@ -1,5 +1,5 @@
 // soem_interface.c - Improved version with CiA 402 state machine and proper initialization
-#include "soem_interface.h"
+#include "soem_interface.h" // This now contains the PDO struct definitions
 #include <stdio.h>
 #include <unistd.h>
 #include <string.h>
@@ -12,9 +12,12 @@
 #include "ethercat.h"
 #include "ethercattype.h"
 
-#ifndef PACKED
-#define PACKED __attribute__((__packed__))
-#endif
+// Note: PACKED is now typically defined in your compiler or other headers.
+// If you still get warnings/errors about PACKED, you might need to ensure it's defined
+// globally or add it back with a proper guard, but usually it's handled.
+// #ifndef PACKED
+// #define PACKED __attribute__((__packed__))
+// #endif
 
 // --- CiA 402 State Machine Definitions ---
 #define CIA402_STATUSWORD_RTSO          0x0001  // Ready to switch on
@@ -44,46 +47,8 @@ int expectedWKC;
 ec_timet tmo;
 
 // --- PDO Structures for Synapticon ACTILINK-S (Slave 1) ---
-// These structures define the expected PDO layout based on PDO_mapping.md.
-// They are crucial for correct data alignment and size matching with the EtherCAT slave.
-/*
-typedef struct PACKED
-{
-    uint16 controlword;         // 0x6040:0x00 (16 bits)
-    int8   modes_of_operation;  // 0x6060:0x00 (8 bits)
-    int16  target_torque;       // 0x6071:0x00 (16 bits)
-    int32  target_position;     // 0x607A:0x00 (32 bits)
-    int32  target_velocity;     // 0x60FF:0x00 (32 bits)
-    int16  torque_offset;       // 0x60B2:0x00 (16 bits)
-    uint32 tuning_command;      // 0x2701:0x00 (32 bits)
-    uint32 physical_outputs;    // 0x60FE:0x01 (32 bits)
-    uint32 bit_mask;            // 0x60FE:0x02 (32 bits) - Assuming this is the 'Bit mask' from doc
-    uint32 user_mosi;           // 0x2703:0x00 (32 bits)
-    int32  velocity_offset;     // 0x60B1:0x00 (32 bits)
-} somanet_rx_pdo_enhanced_t; // Total size: 2+1+2+4+4+2+4+4+4+4+4 = 35 bytes (280 bits)
-
-typedef struct PACKED
-{
-    uint16 statusword;                  // 0x6041:0x00 (16 bits)
-    int8   modes_of_operation_display;  // 0x6061:0x00 (8 bits)
-    int32  position_actual_value;       // 0x6064:0x00 (32 bits)
-    int32  velocity_actual_value;       // 0x606C:0x00 (32 bits)
-    int16  torque_actual_value;         // 0x6077:0x00 (16 bits)
-    uint16 analog_input_1;              // 0x2401:0x00 (16 bits)
-    uint16 analog_input_2;              // 0x2402:0x00 (16 bits)
-    uint16 analog_input_3;              // 0x2403:0x00 (16 bits)
-    uint16 analog_input_4;              // 0x2404:0x00 (16 bits)
-    uint32 tuning_status;               // 0x2702:0x00 (32 bits)
-    uint32 digital_inputs;              // 0x60FD:0x00 (32 bits)
-    uint32 user_miso;                   // 0x2704:0x00 (32 bits)
-    uint32 timestamp;                   // 0x20F0:0x00 (32 bits)
-    int32  position_demand_internal_value; // 0x60FC:0x00 (32 bits)
-    int32  velocity_demand_value;       // 0x606B:0x00 (32 bits)
-    int16  torque_demand;               // 0x6074:0x00 (16 bits)
-} somanet_tx_pdo_enhanced_t; // Total size: 2+1+4+4+2+2+2+2+2+4+4+4+4+4+4+2 = 47 bytes (376 bits)
-*/
-
-// Pointers to the PDO data in the IOmap
+// These structures are now defined ONLY in soem_interface.h to avoid conflicts.
+// We only need to declare the pointers here.
 somanet_rx_pdo_enhanced_t *somanet_outputs;
 somanet_tx_pdo_enhanced_t *somanet_inputs;
 
@@ -621,6 +586,7 @@ int soem_interface_configure_pdo_mapping_enhanced(uint16_t slave_idx, uint16_t p
     for (uint8_t i = 0; i < num_mapped_objects; i++) {
         printf("SOEM_Interface: Writing object %d: 0x%08X\n", i + 1, mapped_objects[i]);
         if (soem_interface_write_sdo(slave_idx, pdo_map_idx, i + 1, sizeof(uint32_t), &mapped_objects[i]) != 0) {
+            fprintf(stderr, "SOEM_Interface: SDO write failed for slave %u, index 0x%04X:%02X\n", slave_idx, pdo_map_idx, i + 1);
             fprintf(stderr, "SOEM_Interface: Failed to write mapping object %d.\n", i + 1);
             return -1;
         }
@@ -741,18 +707,12 @@ int configure_somanet_pdo_mapping_enhanced(uint16_t slave_idx) {
     }
     
     // Define the full RxPDO mapping based on PDO_mapping.md (SM2 outputs)
+    // REDUCED FOR DEBUGGING: Only essential objects for basic control
     uint32_t rxpdo_mapping[] = {
         0x60400010,  // Controlword (16 bits)
         0x60600008,  // Modes of operation (8 bits)
-        0x60710010,  // Target Torque (16 bits)
-        0x607A0020,  // Target position (32 bits)
-        0x60FF0020,  // Target velocity (32 bits)
-        0x60B20010,  // Torque offset (16 bits)
-        0x27010020,  // Tuning command (32 bits)
-        0x60FE0120,  // Physical outputs (32 bits)
-        0x60FE0220,  // Bit mask (32 bits)
-        0x27030020,  // User MOSI (32 bits)
-        0x60B10020   // Velocity offset (32 bits)
+        0x60710010   // Target Torque (16 bits)
+        // Removed: Target position, Target velocity, Torque offset, Tuning command, Physical outputs, Bit mask, User MOSI, Velocity offset
     };
     
     // Define the full TxPDO mapping based on PDO_mapping.md (SM3 inputs)
@@ -868,12 +828,13 @@ int soem_interface_init_enhanced(const char *ifname) {
     // Assign PDO pointers with size validation
     if (ec_slave[slave_idx].outputs > 0) {
         int output_size = ec_slave[slave_idx].Obits / 8;
-        if (output_size >= sizeof(somanet_rx_pdo_enhanced_t)) {
+        // Adjust this check to match the *reduced* RxPDO size for debugging
+        if (output_size >= (sizeof(uint16_t) + sizeof(int8_t) + sizeof(int16_t))) { // Controlword, Modes of operation, Target Torque
             somanet_outputs = (somanet_rx_pdo_enhanced_t *)(ec_slave[slave_idx].outputs);
             printf("SOEM_Interface: somanet_outputs mapped successfully (%d bytes available)\n", output_size);
         } else {
-            fprintf(stderr, "SOEM_Interface: Output PDO size mismatch: need %zu bytes, have %d bytes\n",
-                    sizeof(somanet_rx_pdo_enhanced_t), output_size);
+            fprintf(stderr, "SOEM_Interface: Output PDO size mismatch: need at least %zu bytes, have %d bytes\n",
+                    (sizeof(uint16_t) + sizeof(int8_t) + sizeof(int16_t)), output_size);
             return -1;
         }
     } else {
