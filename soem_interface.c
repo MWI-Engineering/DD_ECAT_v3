@@ -838,7 +838,7 @@ int validate_pdo_configuration(uint16_t slave_idx) {
 }
 
 // Enhanced SOMANET PDO configuration with multiple mapping support
-int configure_somanet_pdo_mapping_enhanced(uint16_t slave_idx) {
+int configure_somanet_pdo_mapping_enhanced(uint16_t slave_idx, uint16_t pdo_assign_idx, uint16_t pdo_map_idx, uint32_t *mapped_objects, uint8_t num_mapped_objects) {
      printf("SOEM_Interface: Starting robust PDO mapping configuration for slave %u...\n", slave_idx);
     
     // First, ensure we're in INIT state for clean configuration
@@ -893,16 +893,14 @@ int configure_somanet_pdo_mapping_enhanced(uint16_t slave_idx) {
            rxpdo_size_bits, rxpdo_size_bits/8, txpdo_size_bits, txpdo_size_bits/8);
     
     // Try to configure with full mapping
-    if (soem_interface_configure_pdo_mapping_enhanced(slave_idx, 0x1C12, 0x1600, 
-                                                     rxpdo_mapping, sizeof(rxpdo_mapping)/sizeof(uint32_t)) != 0) {
-        fprintf(stderr, "SOEM_Interface: RxPDO mapping failed, cannot proceed.\n");
-        return -1; // Critical error, cannot continue without correct RxPDO
+    if (soem_interface_configure_pdo_mapping_enhanced(slave_idx, 0x1C12, 0x1600, rxpdo_mapping, sizeof(rxpdo_mapping)/sizeof(uint32_t)) != 0) {
+        fprintf(stderr, "SOEM_Interface: Critical: RxPDO mapping configuration failed, cannot proceed.\n");
+        return -1;
     }
     
-    if (soem_interface_configure_pdo_mapping_enhanced(slave_idx, 0x1C13, 0x1A00, 
-                                                     txpdo_mapping, sizeof(txpdo_mapping)/sizeof(uint32_t)) != 0) {
-        fprintf(stderr, "SOEM_Interface: TxPDO mapping failed, cannot proceed.\n");
-        return -1; // Critical error, cannot continue without correct TxPDO
+    if (soem_interface_configure_pdo_mapping_enhanced(slave_idx, 0x1C13, 0x1A00, txpdo_mapping, sizeof(txpdo_mapping)/sizeof(uint32_t)) != 0) {
+        fprintf(stderr, "SOEM_Interface: Critical: TxPDO mapping configuration failed, cannot proceed.\n");
+        return -1;
     }
     
     printf("SOEM_Interface: PDO mapping configuration completed\n");
