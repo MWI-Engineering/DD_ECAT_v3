@@ -193,7 +193,7 @@ int initialize_cia402_parameters(uint16_t slave_idx) {
     
     // Set interpolation time period (optional, for smoother operation)
     // Example: 1000 microseconds = 1ms
-    uint8_t interpolation_time_period = 1000; // 1ms
+    uint8_t interpolation_time_period = 1; // 1ms
     int8_t interpolation_time_index = -3;  // 10^-3 seconds
     if (soem_interface_write_sdo(slave_idx, 0x60C2, 0x01, sizeof(interpolation_time_period), &interpolation_time_period) != 0) {
         printf("SOEM_Interface: Warning: Failed to set interpolation time period\n");
