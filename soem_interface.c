@@ -453,7 +453,7 @@ void *ecat_loop(void *ptr) {
                 current_statusword = somanet_inputs->statusword;
                 current_cia402_state = get_cia402_state(current_statusword);
                 current_position_f = (float)somanet_inputs->position_actual_value;
-                current_velocity_f = (float)somanet_inputs->velocity_actual_value;
+                //current_velocity_f = (float)somanet_inputs->velocity_actual_value;
             }
             pthread_mutex_unlock(&pdo_mutex);
             
@@ -890,7 +890,7 @@ float soem_interface_get_current_position() {
     pthread_mutex_unlock(&pdo_mutex);
     return position;
 }
-
+/*
 float soem_interface_get_current_velocity() {
     float velocity;
     pthread_mutex_lock(&pdo_mutex);
@@ -898,7 +898,7 @@ float soem_interface_get_current_velocity() {
     pthread_mutex_unlock(&pdo_mutex);
     return velocity;
 }
-
+*/
 int soem_interface_get_communication_status() {
     return communication_ok;
 }
