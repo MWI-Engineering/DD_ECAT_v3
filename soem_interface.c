@@ -1,5 +1,5 @@
 // soem_interface.c - Improved version with CiA 402 state machine and proper initialization
-#include "soem_interface.h"
+#include "soem_interface.h" 
 #include <stdio.h>
 #include <unistd.h>
 #include <string.h>
@@ -10,8 +10,8 @@
 #include <time.h>
 
 // --- SOEM Library Includes ---
-#include "ethercat.h"
-#include "ethercattype.h"
+#include "ethercat.h"  
+#include "ethercattype.h" 
 
 #ifndef PACKED
 #define PACKED __attribute__((__packed__))
