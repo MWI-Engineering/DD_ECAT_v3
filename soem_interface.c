@@ -848,9 +848,17 @@ int soem_interface_init_enhanced(const char *ifname) {
         return -1;
     }
 
-    // Send initial PDO data
+    // Send initial PDO data and start continuous transmission to prevent watchdog timeout
     ec_send_processdata();
-    usleep(50000); // 50ms delay
+    ec_receive_processdata(EC_TIMEOUTRET);
+    usleep(10000); // 10ms delay (much shorter than watchdog timeout)
+    
+    // Send multiple process data cycles to establish communication
+    for (int wd_cycles = 0; wd_cycles < 10; wd_cycles++) {
+        ec_send_processdata();
+        ec_receive_processdata(EC_TIMEOUTRET);
+        usleep(5000); // 5ms between cycles
+    }
 
     // Transition to Operational with enhanced function
     printf("SOEM_Interface: Transitioning to Operational...\n");
@@ -868,6 +876,8 @@ int soem_interface_init_enhanced(const char *ifname) {
     }
 
     printf("SOEM_Interface: All slaves operational, starting communication thread...\n");
+    
+    // Start communication thread immediately to prevent watchdog timeout
     master_initialized = 1;
     ecat_thread_running = 1;
     
@@ -876,16 +886,18 @@ int soem_interface_init_enhanced(const char *ifname) {
         return -1;
     }
     
-    return 0;
-}
-
-// --- External Interface Functions ---
-void soem_interface_send_and_receive_pdo(float target_torque) {
-    if (!master_initialized) return;
+    // Give the thread time to start and establish communication
+    usleep(50000); // 50ms delay
     
-    pthread_mutex_lock(&pdo_mutex);
-    target_torque_f = target_torque;
-    pthread_mutex_unlock(&pdo_mutex);
+    // Verify slaves are still operational after thread startup
+    for (i = 1; i <= ec_slavecount; i++) {
+        if (!is_slave_operational(i)) {
+            fprintf(stderr, "SOEM_Interface: Slave %d not operational after thread startup\n", i);
+            return -1;
+        }
+    }
+    
+    return 0;
 }
 
 float soem_interface_get_current_position() {
