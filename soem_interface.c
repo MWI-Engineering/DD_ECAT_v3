@@ -51,10 +51,10 @@ typedef struct PACKED
     int16  target_torque;       // 0x6071:0x00
     int32  target_position;     // 0x607A:0x00
     int32  target_velocity;     // 0x60FF:0x00
-    int16  torque_offset;       // 0x60B2:0x00
-    uint32 tuning_command;      // 0x2701:0x00
-    uint32 physical_outputs;    // 0x60FE:0x01
-    uint32 bit_mask;            // Padding for alignment
+    //int16  torque_offset;       // 0x60B2:0x00
+    //uint32 tuning_command;      // 0x2701:0x00
+    //uint32 physical_outputs;    // 0x60FE:0x01
+    //uint32 bit_mask;            // Padding for alignment
 } somanet_rx_pdo_enhanced_t;
 
 typedef struct PACKED
@@ -497,7 +497,7 @@ void *ecat_loop(void *ptr) {
                 current_statusword = somanet_inputs->statusword;
                 current_cia402_state = get_cia402_state(current_statusword);
                 current_position_f = (float)somanet_inputs->position_actual_value;
-                //current_velocity_f = (float)somanet_inputs->velocity_actual_value;
+                current_velocity_f = (float)somanet_inputs->velocity_actual_value;
             }
             pthread_mutex_unlock(&pdo_mutex);
             
