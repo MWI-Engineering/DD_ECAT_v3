@@ -873,7 +873,7 @@ int soem_interface_init_enhanced(const char *ifname) {
     expectedWKC = (ec_group[0].outputsWKC * 2) + ec_group[0].inputsWKC;
     printf("SOEM_Interface: Expected WKC: %d\n", expectedWKC);
 
-    / Initialize CiA 402 parameters in PRE_OP
+    // Initialize CiA 402 parameters in PRE_OP
     if (initialize_cia402_parameters(slave_idx) != 0) {
         printf("SOEM_Interface: CiA 402 initialization had issues, continuing anyway\n");
     }
