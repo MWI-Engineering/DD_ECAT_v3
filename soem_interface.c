@@ -74,22 +74,18 @@ typedef struct PACKED
 // Updated PDO structure definitions to match the enhanced mapping
 typedef struct PACKED
 {
-    uint16 controlword;         // 0x6040:0x00 (16-bit)
-    int8   modes_of_operation;  // 0x6060:0x00 (8-bit)
-    int16  target_torque;       // 0x6071:0x00 (16-bit)
-    int32  target_position;     // 0x607A:0x00 (32-bit)
-    int32  target_velocity;     // 0x60FF:0x00 (32-bit)
-    int16  torque_offset;       // 0x60B2:0x00 (16-bit)
+    uint16 controlword;         // 0x6040:0x00 (16-bit) = 2 bytes
+    int8   modes_of_operation;  // 0x6060:0x00 (8-bit)  = 1 byte
+    int16  target_torque;       // 0x6071:0x00 (16-bit) = 2 bytes
+    int32  target_position;     // 0x607A:0x00 (32-bit) = 4 bytes
 } somanet_rx_pdo_enhanced_t;
 
 typedef struct PACKED
 {
-    uint16 statusword;                  // 0x6041:0x00 (16-bit)
-    int8   modes_of_operation_display;  // 0x6061:0x00 (8-bit)
-    int32  position_actual_value;       // 0x6064:0x00 (32-bit)
-    int32  velocity_actual_value;       // 0x606C:0x00 (32-bit)
-    int16  torque_actual_value;         // 0x6077:0x00 (16-bit)
-    int16  current_actual_value;        // 0x6078:0x00 (16-bit)
+    uint16 statusword;                  // 0x6041:0x00 (16-bit) = 2 bytes
+    int8   modes_of_operation_display;  // 0x6061:0x00 (8-bit)  = 1 byte
+    int32  position_actual_value;       // 0x6064:0x00 (32-bit) = 4 bytes
+    int16  torque_actual_value;         // 0x6077:0x00 (16-bit) = 2 bytes
 } somanet_tx_pdo_enhanced_t;
 
 // Pointers to the PDO data in the IOmap
@@ -877,7 +873,7 @@ int soem_interface_init_enhanced(const char *ifname) {
     if (initialize_cia402_parameters(slave_idx) != 0) {
         printf("SOEM_Interface: CiA 402 initialization had issues, continuing anyway\n");
     }
-
+    */
     // Initialize safe values
     if (somanet_outputs) {
         memset(somanet_outputs, 0, sizeof(somanet_rx_pdo_enhanced_t));
