@@ -1091,6 +1091,32 @@ uint16_t soem_interface_get_statusword() {
     return current_statusword;
 }
 
+// Function to check and print sync manager configuration
+void check_sync_manager_configuration(uint16_t slave_idx) {
+    printf("SOEM_Interface: Checking sync manager configuration for slave %u...\n", slave_idx);
+    
+    // Check sync manager 0 (Mailbox Out)
+    uint16_t sm0_start = 0, sm0_length = 0, sm0_control = 0, sm0_status = 0;
+    if (soem_interface_read_sdo(slave_idx, 0x1C00, 0x01, sizeof(sm0_start), &sm0_start) == 0) {
+        printf("SOEM_Interface: SM0 Start Address: 0x%04X\n", sm0_start);
+    }
+    if (soem_interface_read_sdo(slave_idx, 0x1C00, 0x02, sizeof(sm0_length), &sm0_length) == 0) {
+        printf("SOEM_Interface: SM0 Length: %u\n", sm0_length);
+    }
+    
+    // Check sync manager 2 (Process Data Out)
+    uint16_t sm2_start = 0, sm2_length = 0;
+    if (soem_interface_read_sdo(slave_idx, 0x1C12, 0x01, sizeof(sm2_start), &sm2_start) == 0) {
+        printf("SOEM_Interface: SM2 assigned PDO: 0x%04X\n", sm2_start);
+    }
+    
+    // Check sync manager 3 (Process Data In)
+    uint16_t sm3_start = 0;
+    if (soem_interface_read_sdo(slave_idx, 0x1C13, 0x01, sizeof(sm3_start), &sm3_start) == 0) {
+        printf("SOEM_Interface: SM3 assigned PDO: 0x%04X\n", sm3_start);
+    }
+}
+
 void soem_interface_stop_master() {
     if (master_initialized) {
         printf("SOEM_Interface: Stopping EtherCAT master...\n");
