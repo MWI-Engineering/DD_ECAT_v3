@@ -26,37 +26,37 @@ typedef enum {
 // They are crucial for correct data alignment and size matching with the EtherCAT slave.
 typedef struct PACKED
 {
-    uint16 controlword;         // 0x6040:0x00 (16 bits)
-    int8   modes_of_operation;  // 0x6060:0x00 (8 bits)
-    int16  target_torque;       // 0x6071:0x00 (16 bits)
-    int32  target_position;     // 0x607A:0x00 (32 bits)
-    int32  target_velocity;     // 0x60FF:0x00 (32 bits)
-    int16  torque_offset;       // 0x60B2:0x00 (16 bits)
-    uint32 tuning_command;      // 0x2701:0x00 (32 bits)
-    uint32 physical_outputs;    // 0x60FE:0x01 (32 bits)
-    uint32 bit_mask;            // 0x60FE:0x02 (32 bits) - Assuming this is the 'Bit mask' from doc
-    uint32 user_mosi;           // 0x2703:0x00 (32 bits)
-    int32  velocity_offset;     // 0x60B1:0x00 (32 bits)
+    uint16_t controlword;         // 0x6040:0x00 (16 bits)
+    int8_t   modes_of_operation;  // 0x6060:0x00 (8 bits)
+    int16_t  target_torque;       // 0x6071:0x00 (16 bits)
+    //int32  target_position;     // 0x607A:0x00 (32 bits)
+    //int32  target_velocity;     // 0x60FF:0x00 (32 bits)
+    //int16  torque_offset;       // 0x60B2:0x00 (16 bits)
+    //uint32 tuning_command;      // 0x2701:0x00 (32 bits)
+    //uint32 physical_outputs;    // 0x60FE:0x01 (32 bits)
+    //uint32 bit_mask;            // 0x60FE:0x02 (32 bits) - Assuming this is the 'Bit mask' from doc
+    //uint32 user_mosi;           // 0x2703:0x00 (32 bits)
+    //int32  velocity_offset;     // 0x60B1:0x00 (32 bits)
 } somanet_rx_pdo_enhanced_t;
 
 typedef struct PACKED
 {
-    uint16 statusword;                  // 0x6041:0x00 (16 bits)
-    int8   modes_of_operation_display;  // 0x6061:0x00 (8 bits)
-    int32  position_actual_value;       // 0x6064:0x00 (32 bits)
-    int32  velocity_actual_value;       // 0x606C:0x00 (32 bits)
-    int16  torque_actual_value;         // 0x6077:0x00 (16 bits)
-    uint16 analog_input_1;              // 0x2401:0x00 (16 bits)
-    uint16 analog_input_2;              // 0x2402:0x00 (16 bits)
-    uint16 analog_input_3;              // 0x2403:0x00 (16 bits)
-    uint16 analog_input_4;              // 0x2404:0x00 (16 bits)
-    uint32 tuning_status;               // 0x2702:0x00 (32 bits)
-    uint32 digital_inputs;              // 0x60FD:0x00 (32 bits)
-    uint32 user_miso;                   // 0x2704:0x00 (32 bits)
-    uint32 timestamp;                   // 0x20F0:0x00 (32 bits)
-    int32  position_demand_internal_value; // 0x60FC:0x00 (32 bits)
-    int32  velocity_demand_value;       // 0x606B:0x00 (32 bits)
-    int16  torque_demand;               // 0x6074:0x00 (16 bits)
+    uint16_t statusword;                  // 0x6041:0x00 (16 bits)
+    int8_t   modes_of_operation_display;  // 0x6061:0x00 (8 bits)
+    int32_t  position_actual_value;       // 0x6064:0x00 (32 bits)
+    int3_t  velocity_actual_value;       // 0x606C:0x00 (32 bits)
+    int16_t  torque_actual_value;         // 0x6077:0x00 (16 bits)
+    //uint16 analog_input_1;              // 0x2401:0x00 (16 bits)
+    //uint16 analog_input_2;              // 0x2402:0x00 (16 bits)
+    //uint16 analog_input_3;              // 0x2403:0x00 (16 bits)
+    //uint16 analog_input_4;              // 0x2404:0x00 (16 bits)
+    //uint32 tuning_status;               // 0x2702:0x00 (32 bits)
+    //uint32 digital_inputs;              // 0x60FD:0x00 (32 bits)
+    //uint32 user_miso;                   // 0x2704:0x00 (32 bits)
+    //uint32 timestamp;                   // 0x20F0:0x00 (32 bits)
+    //int32  position_demand_internal_value; // 0x60FC:0x00 (32 bits)
+    //int32  velocity_demand_value;       // 0x606B:0x00 (32 bits)
+    //int16  torque_demand;               // 0x6074:0x00 (16 bits)
 } somanet_tx_pdo_enhanced_t;
 
 // --- Function Prototypes ---

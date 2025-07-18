@@ -824,36 +824,20 @@ int soem_interface_init_enhanced(const char *ifname) {
     }
 
     // Assign PDO pointers with size validation
-    if (ec_slave[slave_idx].outputs > 0) {
+   if (ec_slave[slave_idx].outputs > 0) {
         int output_size = ec_slave[slave_idx].Obits / 8;
-    if (output_size >= sizeof(somanet_rx_pdo_enhanced_t)) {
-        somanet_outputs = (somanet_rx_pdo_enhanced_t *)(ec_slave[slave_idx].outputs);
-        printf("SOEM_Interface: somanet_outputs mapped successfully (%d bytes available, %zu bytes needed)\n", 
-               output_size, sizeof(somanet_rx_pdo_enhanced_t));
+        // Adjust this check to match the *reduced* RxPDO size for debugging
+        if (output_size >= sizeof(uint16_t)) { // Only Controlword (16 bits = 2 bytes)
+            somanet_outputs = (somanet_rx_pdo_enhanced_t *)(ec_slave[slave_idx].outputs);
+            printf("SOEM_Interface: somanet_outputs mapped successfully (%d bytes available)\n", output_size);
+        } else {
+            fprintf(stderr, "SOEM_Interface: Output PDO size mismatch: need at least %zu bytes, have %d bytes\n",
+                    sizeof(uint16_t), output_size);
+            return -1;
+        }
     } else {
-        fprintf(stderr, "SOEM_Interface: Output PDO size mismatch: need %zu bytes, have %d bytes\n",
-                sizeof(somanet_rx_pdo_enhanced_t), output_size);
+        fprintf(stderr, "SOEM_Interface: No output PDO data available!\n");
         return -1;
-    }
-    } else {
-    fprintf(stderr, "SOEM_Interface: No output PDO data available!\n");
-    return -1;
-    }
-
-    if (ec_slave[slave_idx].inputs > 0) {
-      int input_size = ec_slave[slave_idx].Ibits / 8;
-    if (input_size >= sizeof(somanet_tx_pdo_enhanced_t)) {
-        somanet_inputs = (somanet_tx_pdo_enhanced_t *)(ec_slave[slave_idx].inputs);
-        printf("SOEM_Interface: somanet_inputs mapped successfully (%d bytes available, %zu bytes needed)\n", 
-               input_size, sizeof(somanet_tx_pdo_enhanced_t));
-    } else {
-        fprintf(stderr, "SOEM_Interface: Input PDO size mismatch: need %zu bytes, have %d bytes\n",
-                sizeof(somanet_tx_pdo_enhanced_t), input_size);
-        return -1;
-    }
-    } else {
-    fprintf(stderr, "SOEM_Interface: No input PDO data available!\n");
-    return -1;
     }
     
     if (ec_slave[slave_idx].inputs > 0) {
@@ -881,8 +865,8 @@ int soem_interface_init_enhanced(const char *ifname) {
     
     // Initialize safe values
     if (somanet_outputs) {
-      memset(somanet_outputs, 0, sizeof(somanet_rx_pdo_enhanced_t));
-      somanet_outputs->controlword = 0x0006; // Shutdown
+        memset(somanet_outputs, 0, sizeof(somanet_rx_pdo_enhanced_t));
+        somanet_outputs->controlword = 0x0006; // Shutdown
         somanet_outputs->modes_of_operation = 4; // Torque mode
     }
 
