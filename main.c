@@ -167,7 +167,7 @@ int main(int argc, char *argv[]) {
         }
 
         // 6. Send torque command to servo (via EtherCAT)
-        //soem_interface_send_and_receive_pdo(desired_torque);
+        soem_interface_send_and_receive_pdo(desired_torque);
 
         // 7. Read button states
         button_states = read_button_states();

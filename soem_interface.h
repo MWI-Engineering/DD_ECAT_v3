@@ -73,7 +73,7 @@ int soem_interface_init_enhanced(const char *ifname);
  * The actual PDO communication happens in the EtherCAT thread.
  * @param target_torque The desired torque to send to the servo motor.
  */
-//void soem_interface_send_and_receive_pdo(float target_torque);
+void soem_interface_send_and_receive_pdo(float target_torque);
 
 /**
  * @brief Returns the last known position from the servo motor.

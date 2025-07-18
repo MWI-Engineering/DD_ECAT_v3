@@ -908,6 +908,13 @@ int soem_interface_init_enhanced(const char *ifname) {
     
     return 0;
 }
+void soem_interface_send_and_receive_pdo(float target_torque) {
+    if (!master_initialized) return;
+    
+    pthread_mutex_lock(&pdo_mutex);
+    target_torque_f = target_torque;
+    pthread_mutex_unlock(&pdo_mutex);
+}
 
 float soem_interface_get_current_position() {
     float position;
