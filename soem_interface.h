@@ -44,7 +44,7 @@ typedef struct PACKED
     uint16_t statusword;                  // 0x6041:0x00 (16 bits)
     int8_t   modes_of_operation_display;  // 0x6061:0x00 (8 bits)
     int32_t  position_actual_value;       // 0x6064:0x00 (32 bits)
-    int32_t  velocity_actual_value;       // 0x606C:0x00 (32 bits)
+    //int32_t  velocity_actual_value;       // 0x606C:0x00 (32 bits)
     int16_t  torque_actual_value;         // 0x6077:0x00 (16 bits)
     //uint16 analog_input_1;              // 0x2401:0x00 (16 bits)
     //uint16 analog_input_2;              // 0x2402:0x00 (16 bits)
