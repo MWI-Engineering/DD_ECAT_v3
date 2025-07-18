@@ -1,5 +1,5 @@
 // soem_interface.c - Improved version with CiA 402 state machine and proper initialization
-#include "soem_interface.h" // This now contains the PDO struct definitions
+#include "soem_interface.h"
 #include <stdio.h>
 #include <unistd.h>
 #include <string.h>
@@ -12,12 +12,9 @@
 #include "ethercat.h"
 #include "ethercattype.h"
 
-// Note: PACKED is now typically defined in your compiler or other headers.
-// If you still get warnings/errors about PACKED, you might need to ensure it's defined
-// globally or add it back with a proper guard, but usually it's handled.
-// #ifndef PACKED
-// #define PACKED __attribute__((__packed__))
-// #endif
+#ifndef PACKED
+#define PACKED __attribute__((__packed__))
+#endif
 
 // --- CiA 402 State Machine Definitions ---
 #define CIA402_STATUSWORD_RTSO          0x0001  // Ready to switch on
@@ -46,28 +43,9 @@ int wkc;
 int expectedWKC;
 ec_timet tmo;
 
-// --- PDO Structures for Synapticon ACTILINK-S (Slave 1) ---
-// These structures are now defined ONLY in soem_interface.h to avoid conflicts.
-// We only need to declare the pointers here.
-somanet_rx_pdo_enhanced_t *somanet_outputs;
-somanet_tx_pdo_enhanced_t *somanet_inputs;
-
-// Global PDO mapping arrays
-// Define the full RxPDO mapping based on PDO_mapping.md (SM2 outputs)
-uint32_t rxpdo_mapping[] = {
-    0x60400010,  // Controlword (16 bits)
-    0x60600008,  // Modes of operation (8 bits)
-    0x60710010   // Target Torque (16 bits)
-};
-
-// Define the full TxPDO mapping based on PDO_mapping.md (SM3 inputs)
-uint32_t txpdo_mapping[] = {
-    0x60410010,  // Statusword (16 bits)
-    0x60610008,  // Modes of operation display (8 bits)
-    0x60640020,  // Position actual value (32 bits)
-    0x606C0020,  // Velocity actual value (32 bits)
-    0x60770010   // Torque actual value (16 bits)
-};
+// Pointers to the PDO data in the IOmap
+somanet_rx_pdo_enhanced_t *somanet_outputs; // Initialize to NULL, remove if it causes errors
+somanet_tx_pdo_enhanced_t *somanet_inputs; // Initialize to NULL, remove if it causes errors
 
 // Mutex for protecting PDO data access
 static pthread_mutex_t pdo_mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -290,214 +268,68 @@ int soem_interface_read_sdo(uint16_t slave_idx, uint16_t index, uint8_t subindex
 
 // --- Function to set EtherCAT slave state ---
 int soem_interface_set_ethercat_state(uint16_t slave_idx, ec_state desired_state) {
-    int max_retries = 10;  // Increased retries
+    int max_retries = 5;
     int retry_count = 0;
-    uint16_t al_status = 0;
-    
-    // Helper function to decode AL status codes
-    const char* decode_al_status(uint16_t al_status) {
-        switch(al_status) {
-            case 0x0000: return "No error";
-            case 0x0001: return "Unspecified error";
-            case 0x0002: return "No memory";
-            case 0x0011: return "Invalid requested state change";
-            case 0x0012: return "Unknown requested state";
-            case 0x0013: return "Bootstrap not supported";
-            case 0x0014: return "No valid firmware";
-            case 0x0015: return "Invalid mailbox configuration";
-            case 0x0016: return "Invalid mailbox configuration";
-            case 0x0017: return "Invalid sync manager configuration";
-            case 0x0018: return "No valid inputs available";
-            case 0x0019: return "No valid outputs";
-            case 0x001A: return "Synchronization error";
-            case 0x001B: return "Sync manager watchdog";
-            case 0x001C: return "Invalid sync manager types";
-            case 0x001D: return "Invalid output configuration";
-            case 0x001E: return "Invalid input configuration";
-            case 0x001F: return "Invalid watchdog configuration";
-            case 0x0020: return "Slave needs cold start";
-            case 0x0021: return "Slave needs init";
-            case 0x0022: return "Slave needs pre-op";
-            case 0x0023: return "Slave needs safe-op";
-            case 0x0024: return "Invalid input mapping";
-            case 0x0025: return "Invalid output mapping";
-            case 0x0026: return "Inconsistent settings";
-            case 0x0027: return "Freerun not supported";
-            case 0x0028: return "Sync mode not supported";
-            case 0x0029: return "Freerun needs 3 buffer mode";
-            case 0x002A: return "Background watchdog";
-            case 0x002B: return "No valid inputs and outputs";
-            case 0x002C: return "Fatal sync error";
-            case 0x002D: return "No sync error";
-            case 0x002E: return "Invalid DC SYNC configuration";
-            case 0x0030: return "Invalid DC latch configuration";
-            case 0x0031: return "PLL error";
-            case 0x0032: return "DC sync IO error";
-            case 0x0033: return "DC sync timeout error";
-            case 0x0034: return "DC invalid sync cycle time";
-            case 0x0035: return "DC sync0 cycle time";
-            case 0x0036: return "DC sync1 cycle time";
-            default: return "Unknown AL status code";
-        }
-    }
-    
-    printf("SOEM_Interface: Setting slave %u to state %s...\n", 
-           slave_idx, get_state_name(desired_state));
     
     while (retry_count < max_retries) {
-        printf("SOEM_Interface: Attempt %d/%d - Current state: %s\n", 
-               retry_count + 1, max_retries, get_state_name(ec_slave[slave_idx].state));
+        printf("SOEM_Interface: Attempt %d/%d - Setting slave %u to state %s...\n", 
+               retry_count + 1, max_retries, slave_idx, get_state_name(desired_state));
         
-        // Clear AL status before attempting transition
+        // Clear any existing AL status codes
         ec_slave[slave_idx].ALstatuscode = 0;
-        
-        // Special handling for transition to OPERATIONAL from SAFE_OP
-        if (desired_state == EC_STATE_OPERATIONAL && 
-            (ec_slave[slave_idx].state & 0x0F) == EC_STATE_SAFE_OP) {
-            
-            printf("SOEM_Interface: Attempting SAFE_OP -> OPERATIONAL transition\n");
-            
-            // Ensure PDO data is valid before transitioning
-            if (somanet_outputs) {
-                somanet_outputs->controlword = 0x0006; // Shutdown command
-                somanet_outputs->modes_of_operation = 4; // Torque mode
-                somanet_outputs->target_torque = 0;
-            }
-            
-            // Send process data first
-            ec_send_processdata();
-            usleep(50000); // 50ms delay
-            
-            // Check working counter
-            int wkc_check = ec_receive_processdata(EC_TIMEOUTRET);
-            printf("SOEM_Interface: Pre-transition WKC: %d (expected: %d)\n", wkc_check, expectedWKC);
-            
-            if (wkc_check < expectedWKC) {
-                printf("SOEM_Interface: Warning: WKC mismatch before OPERATIONAL transition\n");
-                
-                // Try to recover by sending process data multiple times
-                for (int i = 0; i < 5; i++) {
-                    ec_send_processdata();
-                    usleep(20000);
-                    wkc_check = ec_receive_processdata(EC_TIMEOUTRET);
-                    if (wkc_check >= expectedWKC) break;
-                }
-                
-                if (wkc_check < expectedWKC) {
-                    printf("SOEM_Interface: Failed to establish proper communication, WKC: %d\n", wkc_check);
-                    // Continue anyway, might still work
-                }
-            }
-        }
         
         // Set the desired state
         ec_slave[slave_idx].state = desired_state;
         ec_writestate(slave_idx);
         
-        // Wait for state transition with longer timeout
-        usleep(300000); // 300ms delay - increased from 200ms
+        // Wait longer for state transition
+        usleep(200000); // 200ms delay
         
         // Check the state with extended timeout
-        int wkc_state = ec_statecheck(slave_idx, desired_state, EC_TIMEOUTSTATE * 4);
-        
-        // Get current AL status
-        al_status = ec_slave[slave_idx].ALstatuscode;
+        int wkc_state = ec_statecheck(slave_idx, desired_state, EC_TIMEOUTSTATE * 2);
         
         if (wkc_state > 0 && (ec_slave[slave_idx].state & 0x0F) == desired_state) {
-            printf("SOEM_Interface: ✓ Slave %u successfully transitioned to state %s\n", 
+            printf("SOEM_Interface: Slave %u successfully transitioned to state %s\n", 
                    slave_idx, get_state_name(ec_slave[slave_idx].state));
             return 0;
         }
         
         // Print detailed error information
-        printf("SOEM_Interface: ✗ State transition failed:\n");
-        printf("  Current state: %s (0x%04X)\n", get_state_name(ec_slave[slave_idx].state), ec_slave[slave_idx].state);
-        printf("  Desired state: %s (0x%04X)\n", get_state_name(desired_state), desired_state);
-        printf("  AL status: 0x%04X (%s)\n", al_status, decode_al_status(al_status));
-        printf("  WKC: %d\n", wkc_state);
+        printf("SOEM_Interface: State transition failed - Current state: %s, ALstatuscode: 0x%04X\n",
+               get_state_name(ec_slave[slave_idx].state), ec_slave[slave_idx].ALstatuscode);
         
-        // Specific error handling based on AL status
-        if (al_status == 0x001B) { // Sync manager watchdog
-            printf("SOEM_Interface: Sync manager watchdog error - attempting recovery...\n");
+        // If we're trying to go to OPERATIONAL and stuck in PRE_OP, try intermediate states
+        if (desired_state == EC_STATE_OPERATIONAL && (ec_slave[slave_idx].state & 0x0F) == EC_STATE_PRE_OP) {
+            printf("SOEM_Interface: Slave stuck in PRE_OP, trying intermediate SAFE_OP transition...\n");
             
-            // Try to recover by going back to INIT and reconfiguring
-            if (retry_count < max_retries - 2) { // Don't do this on last attempts
-                printf("SOEM_Interface: Attempting full reset to INIT state...\n");
-                
-                // Force to INIT
-                ec_slave[slave_idx].state = EC_STATE_INIT;
+            // Force to SAFE_OP first
+            ec_slave[slave_idx].state = EC_STATE_SAFE_OP;
+            ec_writestate(slave_idx);
+            usleep(200000);
+            
+            if (ec_statecheck(slave_idx, EC_STATE_SAFE_OP, EC_TIMEOUTSTATE * 2) > 0) {
+                printf("SOEM_Interface: Intermediate SAFE_OP transition successful\n");
+                // Now try OPERATIONAL again
+                ec_slave[slave_idx].state = EC_STATE_OPERATIONAL;
                 ec_writestate(slave_idx);
-                usleep(500000); // 500ms delay
+                usleep(200000);
                 
-                // Check if we reached INIT
-                if (ec_statecheck(slave_idx, EC_STATE_INIT, EC_TIMEOUTSTATE * 2) > 0) {
-                    printf("SOEM_Interface: Reset to INIT successful\n");
-                    
-                    // Reconfigure PDO mapping
-                    if (configure_somanet_pdo_mapping_enhanced(uint16_t slave_idx, uint16_t pdo_assign_idx, uint16_t pdo_map_idx, uint32_t *mapped_objects, uint8_t num_mapped_objects) == 0) {
-                        printf("SOEM_Interface: PDO reconfiguration successful\n");
-                        
-                        // Now try stepping through states again
-                        if (desired_state == EC_STATE_OPERATIONAL) {
-                            // Step through PRE_OP -> SAFE_OP -> OPERATIONAL
-                            ec_slave[slave_idx].state = EC_STATE_PRE_OP;
-                            ec_writestate(slave_idx);
-                            usleep(200000);
-                            
-                            if (ec_statecheck(slave_idx, EC_STATE_PRE_OP, EC_TIMEOUTSTATE * 2) > 0) {
-                                printf("SOEM_Interface: Intermediate PRE_OP reached\n");
-                                
-                                ec_slave[slave_idx].state = EC_STATE_SAFE_OP;
-                                ec_writestate(slave_idx);
-                                usleep(200000);
-                                
-                                if (ec_statecheck(slave_idx, EC_STATE_SAFE_OP, EC_TIMEOUTSTATE * 2) > 0) {
-                                    printf("SOEM_Interface: Intermediate SAFE_OP reached\n");
-                                    // Continue with OPERATIONAL attempt in next iteration
-                                } else {
-                                    printf("SOEM_Interface: Failed to reach SAFE_OP during recovery\n");
-                                }
-                            } else {
-                                printf("SOEM_Interface: Failed to reach PRE_OP during recovery\n");
-                            }
-                        }
-                    } else {
-                        printf("SOEM_Interface: PDO reconfiguration failed\n");
-                    }
-                } else {
-                    printf("SOEM_Interface: Failed to reset to INIT state\n");
+                if (ec_statecheck(slave_idx, EC_STATE_OPERATIONAL, EC_TIMEOUTSTATE * 2) > 0) {
+                    printf("SOEM_Interface: Final OPERATIONAL transition successful\n");
+                    return 0;
                 }
             }
-        }
-        else if (al_status == 0x0024 || al_status == 0x0025) { // Invalid input/output mapping
-            printf("SOEM_Interface: PDO mapping error - this may require manual configuration\n");
-            
-            // Check if we can read the current PDO configuration
-            uint8_t num_objects = 0;
-            if (soem_interface_read_sdo(slave_idx, 0x1A00, 0x00, sizeof(num_objects), &num_objects) == 0) {
-                printf("SOEM_Interface: Current TxPDO mapping has %d objects\n", num_objects);
-            }
-            if (soem_interface_read_sdo(slave_idx, 0x1600, 0x00, sizeof(num_objects), &num_objects) == 0) {
-                printf("SOEM_Interface: Current RxPDO mapping has %d objects\n", num_objects);
-            }
-        }
-        else if (al_status == 0x001A) { // Synchronization error
-            printf("SOEM_Interface: Synchronization error - trying without distributed clocks\n");
-            // You might want to disable DC here if it's causing issues
         }
         
         retry_count++;
         if (retry_count < max_retries) {
-            printf("SOEM_Interface: Retrying in 1 second...\n");
-            usleep(1000000); // 1 second delay before retry
+            printf("SOEM_Interface: Retrying in 500ms...\n");
+            usleep(500000); // 500ms delay before retry
         }
     }
     
-    fprintf(stderr, "SOEM_Interface: ✗ FAILED to set slave %u to state %s after %d attempts\n",
+    fprintf(stderr, "SOEM_Interface: Failed to set slave %u to state %s after %d attempts\n",
             slave_idx, get_state_name(desired_state), max_retries);
-    fprintf(stderr, "SOEM_Interface: Final state: %s, AL status: 0x%04X (%s)\n",
-            get_state_name(ec_slave[slave_idx].state), al_status, decode_al_status(al_status));
-    
     return -1;
 }
 
@@ -687,6 +519,7 @@ int soem_interface_configure_pdo_mapping_enhanced(uint16_t slave_idx, uint16_t p
                                                   uint16_t pdo_map_idx, uint32_t *mapped_objects, 
                                                   uint8_t num_mapped_objects) {
     uint8_t zero_val = 0;
+    uint8_t original_assign_val = 1;
     uint8_t current_num_objects = 0;
     uint32_t current_object = 0;
     
@@ -721,14 +554,13 @@ int soem_interface_configure_pdo_mapping_enhanced(uint16_t slave_idx, uint16_t p
         }
         
         if (mapping_matches) {
-            printf("SOEM_Interface: Current PDO mapping already matches desired configuration. Skipping write.\n");
+            printf("SOEM_Interface: Current PDO mapping already matches desired configuration.\n");
             return 0; // No reconfiguration needed
         }
     }
 
     // Step 2: Disable PDO assignment first (as per Synapticon documentation)
-    // Set subindex 0 of PDO assign to 0 to disable assignment
-    printf("SOEM_Interface: Disabling PDO assignment (0x%04X:0x00 = 0)...\n", pdo_assign_idx);
+    printf("SOEM_Interface: Disabling PDO assignment...\n");
     if (soem_interface_write_sdo(slave_idx, pdo_assign_idx, 0x00, sizeof(zero_val), &zero_val) != 0) {
         fprintf(stderr, "SOEM_Interface: Failed to disable PDO assignment.\n");
         return -1;
@@ -736,7 +568,7 @@ int soem_interface_configure_pdo_mapping_enhanced(uint16_t slave_idx, uint16_t p
     usleep(50000); // 50ms delay
 
     // Step 3: Disable the PDO mapping object (set subindex 0 to 0)
-    printf("SOEM_Interface: Disabling PDO mapping object (0x%04X:0x00 = 0)...\n", pdo_map_idx);
+    printf("SOEM_Interface: Disabling PDO mapping object...\n");
     if (soem_interface_write_sdo(slave_idx, pdo_map_idx, 0x00, sizeof(zero_val), &zero_val) != 0) {
         fprintf(stderr, "SOEM_Interface: Failed to disable PDO mapping.\n");
         return -1;
@@ -744,11 +576,10 @@ int soem_interface_configure_pdo_mapping_enhanced(uint16_t slave_idx, uint16_t p
     usleep(50000); // 50ms delay
 
     // Step 4: Write new mapping objects (subindices 1 to n)
-    printf("SOEM_Interface: Writing %d new mapping objects to 0x%04X...\n", num_mapped_objects, pdo_map_idx);
+    printf("SOEM_Interface: Writing %d new mapping objects...\n", num_mapped_objects);
     for (uint8_t i = 0; i < num_mapped_objects; i++) {
         printf("SOEM_Interface: Writing object %d: 0x%08X\n", i + 1, mapped_objects[i]);
         if (soem_interface_write_sdo(slave_idx, pdo_map_idx, i + 1, sizeof(uint32_t), &mapped_objects[i]) != 0) {
-            fprintf(stderr, "SOEM_Interface: SDO write failed for slave %u, index 0x%04X:%02X\n", slave_idx, pdo_map_idx, i + 1);
             fprintf(stderr, "SOEM_Interface: Failed to write mapping object %d.\n", i + 1);
             return -1;
         }
@@ -756,7 +587,7 @@ int soem_interface_configure_pdo_mapping_enhanced(uint16_t slave_idx, uint16_t p
     }
 
     // Step 5: Enable the PDO mapping by setting subindex 0 to number of objects
-    printf("SOEM_Interface: Enabling PDO mapping (0x%04X:0x00 = %d objects)...\n", pdo_map_idx, num_mapped_objects);
+    printf("SOEM_Interface: Enabling PDO mapping with %d objects...\n", num_mapped_objects);
     if (soem_interface_write_sdo(slave_idx, pdo_map_idx, 0x00, sizeof(num_mapped_objects), &num_mapped_objects) != 0) {
         fprintf(stderr, "SOEM_Interface: Failed to enable PDO mapping.\n");
         return -1;
@@ -764,26 +595,12 @@ int soem_interface_configure_pdo_mapping_enhanced(uint16_t slave_idx, uint16_t p
     usleep(50000); // 50ms delay
 
     // Step 6: Re-enable PDO assignment
-    // This is the corrected logic:
-    // First, assign the PDO map index to subindex 1 of the PDO assign object.
-    // Then, set subindex 0 of the PDO assign object to the number of assigned PDOs (which is 1 in this case).
-    uint16_t pdo_map_idx_u16 = pdo_map_idx; // Cast to uint16_t for the SDO write
-    uint8_t num_assigned_pdo = 1; // We are assigning one PDO (0x1600 or 0x1A00)
-
-    printf("SOEM_Interface: Assigning PDO 0x%04X to 0x%04X:0x01...\n", pdo_map_idx_u16, pdo_assign_idx);
-    if (soem_interface_write_sdo(slave_idx, pdo_assign_idx, 0x01, sizeof(pdo_map_idx_u16), &pdo_map_idx_u16) != 0) {
-        fprintf(stderr, "SOEM_Interface: Failed to assign PDO 0x%04X to 0x%04X:0x01.\n", pdo_map_idx_u16, pdo_assign_idx);
+    printf("SOEM_Interface: Re-enabling PDO assignment...\n");
+    if (soem_interface_write_sdo(slave_idx, pdo_assign_idx, 0x00, sizeof(original_assign_val), &original_assign_val) != 0) {
+        fprintf(stderr, "SOEM_Interface: Failed to re-enable PDO assignment.\n");
         return -1;
     }
     usleep(50000); // 50ms delay
-
-    printf("SOEM_Interface: Setting number of assigned PDOs for 0x%04X:0x00 to %d...\n", pdo_assign_idx, num_assigned_pdo);
-    if (soem_interface_write_sdo(slave_idx, pdo_assign_idx, 0x00, sizeof(num_assigned_pdo), &num_assigned_pdo) != 0) {
-        fprintf(stderr, "SOEM_Interface: Failed to set number of assigned PDOs for 0x%04X:0x00.\n", pdo_assign_idx);
-        return -1;
-    }
-    usleep(50000); // 50ms delay
-
 
     // Step 7: Verify the configuration
     printf("SOEM_Interface: Verifying PDO configuration...\n");
@@ -855,7 +672,7 @@ int validate_pdo_configuration(uint16_t slave_idx) {
 }
 
 // Enhanced SOMANET PDO configuration with multiple mapping support
-int configure_somanet_pdo_mapping_enhanced(uint16_t slave_idx, uint16_t pdo_assign_idx, uint16_t pdo_map_idx, uint32_t *mapped_objects, uint8_t num_mapped_objects) {
+int configure_somanet_pdo_mapping_enhanced(uint16_t slave_idx) {
      printf("SOEM_Interface: Starting robust PDO mapping configuration for slave %u...\n", slave_idx);
     
     // First, ensure we're in INIT state for clean configuration
@@ -877,28 +694,37 @@ int configure_somanet_pdo_mapping_enhanced(uint16_t slave_idx, uint16_t pdo_assi
         return 0; // Continue with default mapping
     }
     
-    // Calculate and verify sizes (for logging purposes)
-    uint16_t rxpdo_size_bits = 0;
-    for (int i = 0; i < sizeof(rxpdo_mapping)/sizeof(uint32_t); i++) {
-        rxpdo_size_bits += (rxpdo_mapping[i] & 0xFF);
-    }
-    uint16_t txpdo_size_bits = 0;
-    for (int i = 0; i < sizeof(txpdo_mapping)/sizeof(uint32_t); i++) {
-        txpdo_size_bits += (txpdo_mapping[i] & 0xFF);
+    // Use minimal essential mapping to avoid size issues
+    uint32_t rxpdo_mapping[] = {
+        0x60400010,  // Controlword (16-bit)
+        0x60600008,  // Modes of operation (8-bit)
+        0x60710010,  // Target torque (16-bit)
+        0x607A0020   // Target position (32-bit)
+    };
+    
+    uint32_t txpdo_mapping[] = {
+        0x60410010,  // Statusword (16-bit)
+        0x60610008,  // Modes of operation display (8-bit)
+        0x60640020,  // Position actual value (32-bit)
+        0x60770010   // Torque actual value (16-bit)
+    };
+    
+    // Calculate and verify sizes
+    uint16_t rxpdo_size_bits = 16 + 8 + 16 + 32; // 72 bits = 9 bytes
+    uint16_t txpdo_size_bits = 16 + 8 + 32 + 16; // 72 bits = 9 bytes
+    
+    printf("SOEM_Interface: Minimal PDO mapping - RxPDO: %d bits, TxPDO: %d bits\n", 
+           rxpdo_size_bits, txpdo_size_bits);
+    
+    // Try to configure with minimal mapping
+    if (soem_interface_configure_pdo_mapping_enhanced(slave_idx, 0x1C12, 0x1600, 
+                                                     rxpdo_mapping, sizeof(rxpdo_mapping)/sizeof(uint32_t)) != 0) {
+        printf("SOEM_Interface: RxPDO mapping failed, using device defaults\n");
     }
     
-    printf("SOEM_Interface: Full PDO mapping - RxPDO: %d bits (%d bytes), TxPDO: %d bits (%d bytes)\n", 
-           rxpdo_size_bits, rxpdo_size_bits/8, txpdo_size_bits, txpdo_size_bits/8);
-    
-    // Try to configure with full mapping
-    if (soem_interface_configure_pdo_mapping_enhanced(slave_idx, 0x1C12, 0x1600, rxpdo_mapping, sizeof(rxpdo_mapping)/sizeof(uint32_t)) != 0) {
-        fprintf(stderr, "SOEM_Interface: Critical: RxPDO mapping configuration failed, cannot proceed.\n");
-        return -1;
-    }
-    
-    if (soem_interface_configure_pdo_mapping_enhanced(slave_idx, 0x1C13, 0x1A00, txpdo_mapping, sizeof(txpdo_mapping)/sizeof(uint32_t)) != 0) {
-        fprintf(stderr, "SOEM_Interface: Critical: TxPDO mapping configuration failed, cannot proceed.\n");
-        return -1;
+    if (soem_interface_configure_pdo_mapping_enhanced(slave_idx, 0x1C13, 0x1A00, 
+                                                     txpdo_mapping, sizeof(txpdo_mapping)/sizeof(uint32_t)) != 0) {
+        printf("SOEM_Interface: TxPDO mapping failed, using device defaults\n");
     }
     
     printf("SOEM_Interface: PDO mapping configuration completed\n");
@@ -943,9 +769,8 @@ int soem_interface_init_enhanced(const char *ifname) {
     }
 
     // Configure PDO mapping with improved robustness
- if (soem_interface_configure_pdo_mapping_enhanced(slave_idx, 0x1C12, 0x1600, rxpdo_mapping, sizeof(rxpdo_mapping)/sizeof(uint32_t)) != 0) {
-        fprintf(stderr, "SOEM_Interface: RxPDO mapping failed, cannot proceed.\n");
-        return -1; // Critical error, cannot continue without correct RxPDO
+    if (configure_somanet_pdo_mapping_enhanced(slave_idx) != 0) {
+        printf("SOEM_Interface: PDO mapping configuration had issues, continuing with defaults\n");
     }
 
     // Configure distributed clocks
@@ -966,15 +791,14 @@ int soem_interface_init_enhanced(const char *ifname) {
     }
 
     // Assign PDO pointers with size validation
-   if (ec_slave[slave_idx].outputs > 0) {
+    if (ec_slave[slave_idx].outputs > 0) {
         int output_size = ec_slave[slave_idx].Obits / 8;
-        // Adjust this check to match the *reduced* RxPDO size for debugging
-        if (output_size >= sizeof(uint16_t)) { // Only Controlword (16 bits = 2 bytes)
+        if (output_size >= sizeof(somanet_rx_pdo_enhanced_t)) {
             somanet_outputs = (somanet_rx_pdo_enhanced_t *)(ec_slave[slave_idx].outputs);
             printf("SOEM_Interface: somanet_outputs mapped successfully (%d bytes available)\n", output_size);
         } else {
-            fprintf(stderr, "SOEM_Interface: Output PDO size mismatch: need at least %zu bytes, have %d bytes\n",
-                    sizeof(uint16_t), output_size);
+            fprintf(stderr, "SOEM_Interface: Output PDO size mismatch: need %zu bytes, have %d bytes\n",
+                    sizeof(somanet_rx_pdo_enhanced_t), output_size);
             return -1;
         }
     } else {
@@ -1085,32 +909,6 @@ cia402_state_t soem_interface_get_cia402_state() {
 
 uint16_t soem_interface_get_statusword() {
     return current_statusword;
-}
-
-// Function to check and print sync manager configuration
-void check_sync_manager_configuration(uint16_t slave_idx) {
-    printf("SOEM_Interface: Checking sync manager configuration for slave %u...\n", slave_idx);
-    
-    // Check sync manager 0 (Mailbox Out)
-    uint16_t sm0_start = 0, sm0_length = 0, sm0_control = 0, sm0_status = 0;
-    if (soem_interface_read_sdo(slave_idx, 0x1C00, 0x01, sizeof(sm0_start), &sm0_start) == 0) {
-        printf("SOEM_Interface: SM0 Start Address: 0x%04X\n", sm0_start);
-    }
-    if (soem_interface_read_sdo(slave_idx, 0x1C00, 0x02, sizeof(sm0_length), &sm0_length) == 0) {
-        printf("SOEM_Interface: SM0 Length: %u\n", sm0_length);
-    }
-    
-    // Check sync manager 2 (Process Data Out)
-    uint16_t sm2_start = 0, sm2_length = 0;
-    if (soem_interface_read_sdo(slave_idx, 0x1C12, 0x01, sizeof(sm2_start), &sm2_start) == 0) {
-        printf("SOEM_Interface: SM2 assigned PDO: 0x%04X\n", sm2_start);
-    }
-    
-    // Check sync manager 3 (Process Data In)
-    uint16_t sm3_start = 0;
-    if (soem_interface_read_sdo(slave_idx, 0x1C13, 0x01, sizeof(sm3_start), &sm3_start) == 0) {
-        printf("SOEM_Interface: SM3 assigned PDO: 0x%04X\n", sm3_start);
-    }
 }
 
 void soem_interface_stop_master() {
