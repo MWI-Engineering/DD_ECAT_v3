@@ -289,7 +289,6 @@ int soem_interface_set_ethercat_state(uint16_t slave_idx, ec_state desired_state
             slave_idx, get_state_name(desired_state), max_retries);
     return -1;
 }
-}
 
 // --- Function to perform CiA 402 state machine transition ---
 int perform_cia402_transition_to_operational(uint16_t slave_idx) {
