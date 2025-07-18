@@ -524,7 +524,6 @@ int soem_interface_configure_pdo_mapping_enhanced(uint16_t slave_idx, uint16_t p
                                                   uint16_t pdo_map_idx, uint32_t *mapped_objects, 
                                                   uint8_t num_mapped_objects) {
     uint8_t zero_val = 0;
-    uint8_t original_assign_val = 1; // This is typically 1 to enable assignment
     uint8_t current_num_objects = 0;
     uint32_t current_object = 0;
     
@@ -602,17 +601,26 @@ int soem_interface_configure_pdo_mapping_enhanced(uint16_t slave_idx, uint16_t p
     usleep(50000); // 50ms delay
 
     // Step 6: Re-enable PDO assignment
-    // Set subindex 0 of PDO assign to 1 (or the actual PDO index, e.g., 0x1600 or 0x1A00)
-    // For Synapticon, typically you write the PDO map index to subindex 1 of the assign object.
-    // The value 1 for original_assign_val is likely incorrect for re-enabling assignment.
-    // It should be the PDO map index itself (e.g., 0x1600 for RxPDO, 0x1A00 for TxPDO)
+    // This is the corrected logic:
+    // First, assign the PDO map index to subindex 1 of the PDO assign object.
+    // Then, set subindex 0 of the PDO assign object to the number of assigned PDOs (which is 1 in this case).
     uint16_t pdo_map_idx_u16 = pdo_map_idx; // Cast to uint16_t for the SDO write
-    printf("SOEM_Interface: Re-enabling PDO assignment (0x%04X:0x00 = 0x%04X)...\n", pdo_assign_idx, pdo_map_idx_u16);
-    if (soem_interface_write_sdo(slave_idx, pdo_assign_idx, 0x00, sizeof(pdo_map_idx_u16), &pdo_map_idx_u16) != 0) {
-        fprintf(stderr, "SOEM_Interface: Failed to re-enable PDO assignment.\n");
+    uint8_t num_assigned_pdo = 1; // We are assigning one PDO (0x1600 or 0x1A00)
+
+    printf("SOEM_Interface: Assigning PDO 0x%04X to 0x%04X:0x01...\n", pdo_map_idx_u16, pdo_assign_idx);
+    if (soem_interface_write_sdo(slave_idx, pdo_assign_idx, 0x01, sizeof(pdo_map_idx_u16), &pdo_map_idx_u16) != 0) {
+        fprintf(stderr, "SOEM_Interface: Failed to assign PDO 0x%04X to 0x%04X:0x01.\n", pdo_map_idx_u16, pdo_assign_idx);
         return -1;
     }
     usleep(50000); // 50ms delay
+
+    printf("SOEM_Interface: Setting number of assigned PDOs for 0x%04X:0x00 to %d...\n", pdo_assign_idx, num_assigned_pdo);
+    if (soem_interface_write_sdo(slave_idx, pdo_assign_idx, 0x00, sizeof(num_assigned_pdo), &num_assigned_pdo) != 0) {
+        fprintf(stderr, "SOEM_Interface: Failed to set number of assigned PDOs for 0x%04X:0x00.\n", pdo_assign_idx);
+        return -1;
+    }
+    usleep(50000); // 50ms delay
+
 
     // Step 7: Verify the configuration
     printf("SOEM_Interface: Verifying PDO configuration...\n");
