@@ -173,8 +173,11 @@ int main(int argc, char *argv[]) {
         button_states = read_button_states();
 
         // 8. Send gamepad report (position, buttons) to PC (via HID)
-        normalized_position = normalize_position_for_hid(current_position);
-        hid_interface_send_gamepad_report(normalized_position, button_states);
+        // Only send if we're still running
+        if (running) {
+            normalized_position = normalize_position_for_hid(current_position);
+            hid_interface_send_gamepad_report(normalized_position, button_states);
+        }
 
         // --- Performance Monitoring ---
         clock_gettime(CLOCK_MONOTONIC, &end_time);
@@ -218,6 +221,9 @@ int main(int argc, char *argv[]) {
 
     // --- Cleanup ---
     printf("Cleaning up...\n");
+    
+    // Set the running flag to false again to ensure all threads recognize it
+    running = 0;
     
     // Stop EtherCAT master first to ensure safe torque shutdown
     soem_interface_stop_master();

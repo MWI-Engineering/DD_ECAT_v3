@@ -24,8 +24,8 @@ static int queue_count = 0;
 static pthread_mutex_t queue_mutex = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t queue_cond = PTHREAD_COND_INITIALIZER;
 
-// Thread running flag
-static volatile int hid_running = 0;
+// Thread running flag - accessible by all hid_interface functions
+volatile int hid_running = 0;
 
 static int hidg_fd = -1;
 
@@ -380,7 +380,8 @@ int hid_interface_get_ffb_effect(ffb_effect_t *effect_out) {
  * @param buttons The state of the buttons (bitmask).
  */
 void hid_interface_send_gamepad_report(float position, unsigned int buttons) {
-    if (hidg_fd < 0) return;
+    // Check both hidg_fd validity and running state
+    if (hidg_fd < 0 || !hid_running) return;
 
     // Rate limiting: only send reports every HID_SEND_INTERVAL_MS milliseconds
     if (rate_limit_enabled) {

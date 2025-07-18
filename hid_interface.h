@@ -4,6 +4,9 @@
 
 #include "ffb_types.h"
 
+// Global running flag
+extern volatile int hid_running;
+
 // Function prototypes
 int hid_interface_init();
 int hid_interface_start();
