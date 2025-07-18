@@ -718,8 +718,8 @@ int configure_somanet_pdo_mapping_enhanced(uint16_t slave_idx) {
     // REDUCED FOR DEBUGGING: Only essential objects for basic control
     uint32_t rxpdo_mapping[] = {
         0x60400010,  // Controlword (16 bits)
-        0x60600008,  // Modes of operation (8 bits)
-        0x60710010   // Target Torque (16 bits)
+        //0x60600008,  // Modes of operation (8 bits)
+        //0x60710010   // Target Torque (16 bits)
         // Removed: Target position, Target velocity, Torque offset, Tuning command, Physical outputs, Bit mask, User MOSI, Velocity offset
     };
     
@@ -824,15 +824,15 @@ int soem_interface_init_enhanced(const char *ifname) {
     }
 
     // Assign PDO pointers with size validation
-    if (ec_slave[slave_idx].outputs > 0) {
+   if (ec_slave[slave_idx].outputs > 0) {
         int output_size = ec_slave[slave_idx].Obits / 8;
         // Adjust this check to match the *reduced* RxPDO size for debugging
-        if (output_size >= (sizeof(uint16_t) + sizeof(int8_t) + sizeof(int16_t))) { // Controlword, Modes of operation, Target Torque
+        if (output_size >= sizeof(uint16_t)) { // Only Controlword (16 bits = 2 bytes)
             somanet_outputs = (somanet_rx_pdo_enhanced_t *)(ec_slave[slave_idx].outputs);
             printf("SOEM_Interface: somanet_outputs mapped successfully (%d bytes available)\n", output_size);
         } else {
             fprintf(stderr, "SOEM_Interface: Output PDO size mismatch: need at least %zu bytes, have %d bytes\n",
-                    (sizeof(uint16_t) + sizeof(int8_t) + sizeof(int16_t)), output_size);
+                    sizeof(uint16_t), output_size);
             return -1;
         }
     } else {
