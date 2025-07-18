@@ -273,68 +273,214 @@ int soem_interface_read_sdo(uint16_t slave_idx, uint16_t index, uint8_t subindex
 
 // --- Function to set EtherCAT slave state ---
 int soem_interface_set_ethercat_state(uint16_t slave_idx, ec_state desired_state) {
-    int max_retries = 5;
+    int max_retries = 10;  // Increased retries
     int retry_count = 0;
+    uint16_t al_status = 0;
+    
+    // Helper function to decode AL status codes
+    const char* decode_al_status(uint16_t al_status) {
+        switch(al_status) {
+            case 0x0000: return "No error";
+            case 0x0001: return "Unspecified error";
+            case 0x0002: return "No memory";
+            case 0x0011: return "Invalid requested state change";
+            case 0x0012: return "Unknown requested state";
+            case 0x0013: return "Bootstrap not supported";
+            case 0x0014: return "No valid firmware";
+            case 0x0015: return "Invalid mailbox configuration";
+            case 0x0016: return "Invalid mailbox configuration";
+            case 0x0017: return "Invalid sync manager configuration";
+            case 0x0018: return "No valid inputs available";
+            case 0x0019: return "No valid outputs";
+            case 0x001A: return "Synchronization error";
+            case 0x001B: return "Sync manager watchdog";
+            case 0x001C: return "Invalid sync manager types";
+            case 0x001D: return "Invalid output configuration";
+            case 0x001E: return "Invalid input configuration";
+            case 0x001F: return "Invalid watchdog configuration";
+            case 0x0020: return "Slave needs cold start";
+            case 0x0021: return "Slave needs init";
+            case 0x0022: return "Slave needs pre-op";
+            case 0x0023: return "Slave needs safe-op";
+            case 0x0024: return "Invalid input mapping";
+            case 0x0025: return "Invalid output mapping";
+            case 0x0026: return "Inconsistent settings";
+            case 0x0027: return "Freerun not supported";
+            case 0x0028: return "Sync mode not supported";
+            case 0x0029: return "Freerun needs 3 buffer mode";
+            case 0x002A: return "Background watchdog";
+            case 0x002B: return "No valid inputs and outputs";
+            case 0x002C: return "Fatal sync error";
+            case 0x002D: return "No sync error";
+            case 0x002E: return "Invalid DC SYNC configuration";
+            case 0x0030: return "Invalid DC latch configuration";
+            case 0x0031: return "PLL error";
+            case 0x0032: return "DC sync IO error";
+            case 0x0033: return "DC sync timeout error";
+            case 0x0034: return "DC invalid sync cycle time";
+            case 0x0035: return "DC sync0 cycle time";
+            case 0x0036: return "DC sync1 cycle time";
+            default: return "Unknown AL status code";
+        }
+    }
+    
+    printf("SOEM_Interface: Setting slave %u to state %s...\n", 
+           slave_idx, get_state_name(desired_state));
     
     while (retry_count < max_retries) {
-        printf("SOEM_Interface: Attempt %d/%d - Setting slave %u to state %s...\n", 
-               retry_count + 1, max_retries, slave_idx, get_state_name(desired_state));
+        printf("SOEM_Interface: Attempt %d/%d - Current state: %s\n", 
+               retry_count + 1, max_retries, get_state_name(ec_slave[slave_idx].state));
         
-        // Clear any existing AL status codes
+        // Clear AL status before attempting transition
         ec_slave[slave_idx].ALstatuscode = 0;
+        
+        // Special handling for transition to OPERATIONAL from SAFE_OP
+        if (desired_state == EC_STATE_OPERATIONAL && 
+            (ec_slave[slave_idx].state & 0x0F) == EC_STATE_SAFE_OP) {
+            
+            printf("SOEM_Interface: Attempting SAFE_OP -> OPERATIONAL transition\n");
+            
+            // Ensure PDO data is valid before transitioning
+            if (somanet_outputs) {
+                somanet_outputs->controlword = 0x0006; // Shutdown command
+                somanet_outputs->modes_of_operation = 4; // Torque mode
+                somanet_outputs->target_torque = 0;
+            }
+            
+            // Send process data first
+            ec_send_processdata();
+            usleep(50000); // 50ms delay
+            
+            // Check working counter
+            int wkc_check = ec_receive_processdata(EC_TIMEOUTRET);
+            printf("SOEM_Interface: Pre-transition WKC: %d (expected: %d)\n", wkc_check, expectedWKC);
+            
+            if (wkc_check < expectedWKC) {
+                printf("SOEM_Interface: Warning: WKC mismatch before OPERATIONAL transition\n");
+                
+                // Try to recover by sending process data multiple times
+                for (int i = 0; i < 5; i++) {
+                    ec_send_processdata();
+                    usleep(20000);
+                    wkc_check = ec_receive_processdata(EC_TIMEOUTRET);
+                    if (wkc_check >= expectedWKC) break;
+                }
+                
+                if (wkc_check < expectedWKC) {
+                    printf("SOEM_Interface: Failed to establish proper communication, WKC: %d\n", wkc_check);
+                    // Continue anyway, might still work
+                }
+            }
+        }
         
         // Set the desired state
         ec_slave[slave_idx].state = desired_state;
         ec_writestate(slave_idx);
         
-        // Wait longer for state transition
-        usleep(200000); // 200ms delay
+        // Wait for state transition with longer timeout
+        usleep(300000); // 300ms delay - increased from 200ms
         
         // Check the state with extended timeout
-        int wkc_state = ec_statecheck(slave_idx, desired_state, EC_TIMEOUTSTATE * 2);
+        int wkc_state = ec_statecheck(slave_idx, desired_state, EC_TIMEOUTSTATE * 4);
+        
+        // Get current AL status
+        al_status = ec_slave[slave_idx].ALstatuscode;
         
         if (wkc_state > 0 && (ec_slave[slave_idx].state & 0x0F) == desired_state) {
-            printf("SOEM_Interface: Slave %u successfully transitioned to state %s\n", 
+            printf("SOEM_Interface: ✓ Slave %u successfully transitioned to state %s\n", 
                    slave_idx, get_state_name(ec_slave[slave_idx].state));
             return 0;
         }
         
         // Print detailed error information
-        printf("SOEM_Interface: State transition failed - Current state: %s, ALstatuscode: 0x%04X\n",
-               get_state_name(ec_slave[slave_idx].state), ec_slave[slave_idx].ALstatuscode);
+        printf("SOEM_Interface: ✗ State transition failed:\n");
+        printf("  Current state: %s (0x%04X)\n", get_state_name(ec_slave[slave_idx].state), ec_slave[slave_idx].state);
+        printf("  Desired state: %s (0x%04X)\n", get_state_name(desired_state), desired_state);
+        printf("  AL status: 0x%04X (%s)\n", al_status, decode_al_status(al_status));
+        printf("  WKC: %d\n", wkc_state);
         
-        // If we're trying to go to OPERATIONAL and stuck in PRE_OP, try intermediate states
-        if (desired_state == EC_STATE_OPERATIONAL && (ec_slave[slave_idx].state & 0x0F) == EC_STATE_PRE_OP) {
-            printf("SOEM_Interface: Slave stuck in PRE_OP, trying intermediate SAFE_OP transition...\n");
+        // Specific error handling based on AL status
+        if (al_status == 0x001B) { // Sync manager watchdog
+            printf("SOEM_Interface: Sync manager watchdog error - attempting recovery...\n");
             
-            // Force to SAFE_OP first
-            ec_slave[slave_idx].state = EC_STATE_SAFE_OP;
-            ec_writestate(slave_idx);
-            usleep(200000);
-            
-            if (ec_statecheck(slave_idx, EC_STATE_SAFE_OP, EC_TIMEOUTSTATE * 2) > 0) {
-                printf("SOEM_Interface: Intermediate SAFE_OP transition successful\n");
-                // Now try OPERATIONAL again
-                ec_slave[slave_idx].state = EC_STATE_OPERATIONAL;
-                ec_writestate(slave_idx);
-                usleep(200000);
+            // Try to recover by going back to INIT and reconfiguring
+            if (retry_count < max_retries - 2) { // Don't do this on last attempts
+                printf("SOEM_Interface: Attempting full reset to INIT state...\n");
                 
-                if (ec_statecheck(slave_idx, EC_STATE_OPERATIONAL, EC_TIMEOUTSTATE * 2) > 0) {
-                    printf("SOEM_Interface: Final OPERATIONAL transition successful\n");
-                    return 0;
+                // Force to INIT
+                ec_slave[slave_idx].state = EC_STATE_INIT;
+                ec_writestate(slave_idx);
+                usleep(500000); // 500ms delay
+                
+                // Check if we reached INIT
+                if (ec_statecheck(slave_idx, EC_STATE_INIT, EC_TIMEOUTSTATE * 2) > 0) {
+                    printf("SOEM_Interface: Reset to INIT successful\n");
+                    
+                    // Reconfigure PDO mapping
+                    if (configure_somanet_pdo_mapping_enhanced(slave_idx) == 0) {
+                        printf("SOEM_Interface: PDO reconfiguration successful\n");
+                        
+                        // Now try stepping through states again
+                        if (desired_state == EC_STATE_OPERATIONAL) {
+                            // Step through PRE_OP -> SAFE_OP -> OPERATIONAL
+                            ec_slave[slave_idx].state = EC_STATE_PRE_OP;
+                            ec_writestate(slave_idx);
+                            usleep(200000);
+                            
+                            if (ec_statecheck(slave_idx, EC_STATE_PRE_OP, EC_TIMEOUTSTATE * 2) > 0) {
+                                printf("SOEM_Interface: Intermediate PRE_OP reached\n");
+                                
+                                ec_slave[slave_idx].state = EC_STATE_SAFE_OP;
+                                ec_writestate(slave_idx);
+                                usleep(200000);
+                                
+                                if (ec_statecheck(slave_idx, EC_STATE_SAFE_OP, EC_TIMEOUTSTATE * 2) > 0) {
+                                    printf("SOEM_Interface: Intermediate SAFE_OP reached\n");
+                                    // Continue with OPERATIONAL attempt in next iteration
+                                } else {
+                                    printf("SOEM_Interface: Failed to reach SAFE_OP during recovery\n");
+                                }
+                            } else {
+                                printf("SOEM_Interface: Failed to reach PRE_OP during recovery\n");
+                            }
+                        }
+                    } else {
+                        printf("SOEM_Interface: PDO reconfiguration failed\n");
+                    }
+                } else {
+                    printf("SOEM_Interface: Failed to reset to INIT state\n");
                 }
             }
+        }
+        else if (al_status == 0x0024 || al_status == 0x0025) { // Invalid input/output mapping
+            printf("SOEM_Interface: PDO mapping error - this may require manual configuration\n");
+            
+            // Check if we can read the current PDO configuration
+            uint8_t num_objects = 0;
+            if (soem_interface_read_sdo(slave_idx, 0x1A00, 0x00, sizeof(num_objects), &num_objects) == 0) {
+                printf("SOEM_Interface: Current TxPDO mapping has %d objects\n", num_objects);
+            }
+            if (soem_interface_read_sdo(slave_idx, 0x1600, 0x00, sizeof(num_objects), &num_objects) == 0) {
+                printf("SOEM_Interface: Current RxPDO mapping has %d objects\n", num_objects);
+            }
+        }
+        else if (al_status == 0x001A) { // Synchronization error
+            printf("SOEM_Interface: Synchronization error - trying without distributed clocks\n");
+            // You might want to disable DC here if it's causing issues
         }
         
         retry_count++;
         if (retry_count < max_retries) {
-            printf("SOEM_Interface: Retrying in 500ms...\n");
-            usleep(500000); // 500ms delay before retry
+            printf("SOEM_Interface: Retrying in 1 second...\n");
+            usleep(1000000); // 1 second delay before retry
         }
     }
     
-    fprintf(stderr, "SOEM_Interface: Failed to set slave %u to state %s after %d attempts\n",
+    fprintf(stderr, "SOEM_Interface: ✗ FAILED to set slave %u to state %s after %d attempts\n",
             slave_idx, get_state_name(desired_state), max_retries);
+    fprintf(stderr, "SOEM_Interface: Final state: %s, AL status: 0x%04X (%s)\n",
+            get_state_name(ec_slave[slave_idx].state), al_status, decode_al_status(al_status));
+    
     return -1;
 }
 
@@ -807,7 +953,7 @@ int soem_interface_init_enhanced(const char *ifname) {
     }
 
     // Configure distributed clocks
-    //ec_configdc();
+    ec_configdc();
 
     // Map the IO
     printf("SOEM_Interface: Mapping IO...\n");
