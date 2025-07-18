@@ -182,6 +182,98 @@ uint16_t get_cia402_controlword_for_transition(cia402_state_t current_state, cia
     return 0x0006;
 }
 
+// Function to initialize CiA 402 parameters via SDO
+int initialize_cia402_parameters(uint16_t slave_idx) {
+    printf("SOEM_Interface: Initializing CiA 402 parameters for slave %u...\n", slave_idx);
+    
+    // Set modes of operation to torque mode (4)
+    int8_t torque_mode = 4;
+    if (soem_interface_write_sdo(slave_idx, 0x6060, 0x00, sizeof(torque_mode), &torque_mode) != 0) {
+        fprintf(stderr, "SOEM_Interface: Failed to set modes of operation to torque mode\n");
+        return -1;
+    }
+    printf("SOEM_Interface: Set modes of operation to torque mode (4)\n");
+    
+    // Set motor rated current (example: 3000 mA = 3A)
+    // Note: Adjust this value according to your motor specifications
+    uint32_t motor_rated_current = 3000; // mA
+    if (soem_interface_write_sdo(slave_idx, 0x6075, 0x00, sizeof(motor_rated_current), &motor_rated_current) != 0) {
+        printf("SOEM_Interface: Warning: Failed to set motor rated current (may not be supported)\n");
+    } else {
+        printf("SOEM_Interface: Set motor rated current to %u mA\n", motor_rated_current);
+    }
+    
+    // Set max torque (example: 1000 per mille = 100% of rated torque)
+    uint16_t max_torque = 1000; // per mille
+    if (soem_interface_write_sdo(slave_idx, 0x6072, 0x00, sizeof(max_torque), &max_torque) != 0) {
+        printf("SOEM_Interface: Warning: Failed to set max torque\n");
+    } else {
+        printf("SOEM_Interface: Set max torque to %u per mille\n", max_torque);
+    }
+    
+    // Set torque slope (acceleration/deceleration limit)
+    // Example: 10000 per mille/s (adjust based on your application needs)
+    uint32_t torque_slope = 10000;
+    if (soem_interface_write_sdo(slave_idx, 0x6087, 0x00, sizeof(torque_slope), &torque_slope) != 0) {
+        printf("SOEM_Interface: Warning: Failed to set torque slope\n");
+    } else {
+        printf("SOEM_Interface: Set torque slope to %u per mille/s\n", torque_slope);
+    }
+    
+    // Set interpolation time period (optional, for smoother operation)
+    // Example: 1000 microseconds = 1ms
+    uint8_t interpolation_time_period = 1; // 1ms
+    int8_t interpolation_time_index = -3;  // 10^-3 seconds
+    if (soem_interface_write_sdo(slave_idx, 0x60C2, 0x01, sizeof(interpolation_time_period), &interpolation_time_period) != 0) {
+        printf("SOEM_Interface: Warning: Failed to set interpolation time period\n");
+    } else {
+        printf("SOEM_Interface: Set interpolation time period to %u ms\n", interpolation_time_period);
+    }
+    
+    if (soem_interface_write_sdo(slave_idx, 0x60C2, 0x02, sizeof(interpolation_time_index), &interpolation_time_index) != 0) {
+        printf("SOEM_Interface: Warning: Failed to set interpolation time index\n");
+    } else {
+        printf("SOEM_Interface: Set interpolation time index to %d\n", interpolation_time_index);
+    }
+    
+    // Set position encoder resolution (if available)
+    // This is device-specific and may not be needed for all drives
+    uint32_t encoder_increments = 4096; // Example: 4096 increments per revolution
+    if (soem_interface_write_sdo(slave_idx, 0x608F, 0x01, sizeof(encoder_increments), &encoder_increments) != 0) {
+        printf("SOEM_Interface: Info: Encoder increments setting not available (normal for some drives)\n");
+    } else {
+        printf("SOEM_Interface: Set encoder increments to %u per revolution\n", encoder_increments);
+    }
+    
+    // Set gear ratio (if applicable)
+    uint32_t gear_ratio_num = 1;   // Numerator
+    uint32_t gear_ratio_den = 1;   // Denominator
+    if (soem_interface_write_sdo(slave_idx, 0x608F, 0x02, sizeof(gear_ratio_num), &gear_ratio_num) != 0) {
+        printf("SOEM_Interface: Info: Gear ratio setting not available (normal for direct drive)\n");
+    } else {
+        printf("SOEM_Interface: Set gear ratio to %u/%u\n", gear_ratio_num, gear_ratio_den);
+    }
+    
+    // Wait for parameters to be processed
+    usleep(100000); // 100ms delay
+    
+    // Verify modes of operation was set correctly
+    int8_t current_mode = 0;
+    if (soem_interface_read_sdo(slave_idx, 0x6061, 0x00, sizeof(current_mode), &current_mode) == 0) {
+        printf("SOEM_Interface: Current modes of operation display: %d\n", current_mode);
+        if (current_mode == torque_mode) {
+            printf("SOEM_Interface: Mode verification successful\n");
+        } else {
+            printf("SOEM_Interface: Warning: Mode not yet active (expected %d, got %d)\n", torque_mode, current_mode);
+        }
+    } else {
+        printf("SOEM_Interface: Warning: Could not verify modes of operation\n");
+    }
+    
+    printf("SOEM_Interface: CiA 402 parameter initialization completed\n");
+    return 0;
+}
+
 // --- Helper function to check if slave is in operational state ---
 int is_slave_operational(int slave_idx) {
     uint16 actual_state = ec_slave[slave_idx].state & 0x0F;
@@ -781,12 +873,11 @@ int soem_interface_init_enhanced(const char *ifname) {
     expectedWKC = (ec_group[0].outputsWKC * 2) + ec_group[0].inputsWKC;
     printf("SOEM_Interface: Expected WKC: %d\n", expectedWKC);
 
-    /*/ Initialize CiA 402 parameters in PRE_OP
+    / Initialize CiA 402 parameters in PRE_OP
     if (initialize_cia402_parameters(slave_idx) != 0) {
         printf("SOEM_Interface: CiA 402 initialization had issues, continuing anyway\n");
     }
-    */
-   
+
     // Initialize safe values
     if (somanet_outputs) {
         memset(somanet_outputs, 0, sizeof(somanet_rx_pdo_enhanced_t));
