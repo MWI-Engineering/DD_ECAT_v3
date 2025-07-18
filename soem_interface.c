@@ -807,7 +807,7 @@ int soem_interface_init_enhanced(const char *ifname) {
     }
 
     // Configure distributed clocks
-    ec_configdc();
+    //ec_configdc();
 
     // Map the IO
     printf("SOEM_Interface: Mapping IO...\n");
