@@ -434,7 +434,7 @@ int soem_interface_set_ethercat_state(uint16_t slave_idx, ec_state desired_state
                     printf("SOEM_Interface: Reset to INIT successful\n");
                     
                     // Reconfigure PDO mapping
-                    if (configure_somanet_pdo_mapping_enhanced(slave_idx) == 0) {
+                    if (configure_somanet_pdo_mapping_enhanced(uint16_t slave_idx, uint16_t pdo_assign_idx, uint16_t pdo_map_idx, uint32_t *mapped_objects, uint8_t num_mapped_objects) == 0) {
                         printf("SOEM_Interface: PDO reconfiguration successful\n");
                         
                         // Now try stepping through states again
@@ -855,7 +855,7 @@ int validate_pdo_configuration(uint16_t slave_idx) {
 }
 
 // Enhanced SOMANET PDO configuration with multiple mapping support
-int configure_somanet_pdo_mapping_enhanced(uint16_t slave_idx, uint16_t pdo_assign_idx, uint16_t pdo_map_idx) {
+int configure_somanet_pdo_mapping_enhanced(uint16_t slave_idx, uint16_t pdo_assign_idx, uint16_t pdo_map_idx, uint32_t *mapped_objects, uint8_t num_mapped_objects) {
      printf("SOEM_Interface: Starting robust PDO mapping configuration for slave %u...\n", slave_idx);
     
     // First, ensure we're in INIT state for clean configuration
