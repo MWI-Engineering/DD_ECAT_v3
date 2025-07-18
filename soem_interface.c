@@ -883,7 +883,7 @@ int soem_interface_init_enhanced(const char *ifname) {
 
     // Use enhanced state transition function
     printf("SOEM_Interface: Transitioning to Safe-Operational...\n");
-    if (soem_interface_set_ethercat_state(0, EC_STATE_SAFE_OP) != 0) {
+    if (soem_interface_set_ethercat_state(slave_idx, EC_STATE_SAFE_OP) != 0) {
         fprintf(stderr, "SOEM_Interface: Failed to reach Safe-Operational state\n");
         return -1;
     }
@@ -894,7 +894,7 @@ int soem_interface_init_enhanced(const char *ifname) {
 
     // Transition to Operational with enhanced function
     printf("SOEM_Interface: Transitioning to Operational...\n");
-    if (soem_interface_set_ethercat_state(0, EC_STATE_OPERATIONAL) != 0) {
+    if (soem_interface_set_ethercat_state(slave_idx, EC_STATE_OPERATIONAL) != 0) {
         fprintf(stderr, "SOEM_Interface: Failed to reach Operational state\n");
         return -1;
     }
