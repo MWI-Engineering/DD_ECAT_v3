@@ -44,52 +44,46 @@ int expectedWKC;
 ec_timet tmo;
 
 // --- PDO Structures for Synapticon ACTILINK-S (Slave 1) ---
+// These structures define the expected PDO layout based on PDO_mapping.md.
+// They are crucial for correct data alignment and size matching with the EtherCAT slave.
 typedef struct PACKED
 {
-    uint16 controlword;         // 0x6040:0x00
-    int8   modes_of_operation;  // 0x6060:0x00
-    int16  target_torque;       // 0x6071:0x00
-    int32  target_position;     // 0x607A:0x00
-    //int32  target_velocity;     // 0x60FF:0x00
-    //int16  torque_offset;       // 0x60B2:0x00
-    //uint32 tuning_command;      // 0x2701:0x00
-    //uint32 physical_outputs;    // 0x60FE:0x01
-    //uint32 bit_mask;            // Padding for alignment
-} somanet_rx_pdo_enhanced_t;
+    uint16 controlword;         // 0x6040:0x00 (16 bits)
+    int8   modes_of_operation;  // 0x6060:0x00 (8 bits)
+    int16  target_torque;       // 0x6071:0x00 (16 bits)
+    int32  target_position;     // 0x607A:0x00 (32 bits)
+    int32  target_velocity;     // 0x60FF:0x00 (32 bits)
+    int16  torque_offset;       // 0x60B2:0x00 (16 bits)
+    uint32 tuning_command;      // 0x2701:0x00 (32 bits)
+    uint32 physical_outputs;    // 0x60FE:0x01 (32 bits)
+    uint32 bit_mask;            // 0x60FE:0x02 (32 bits) - Assuming this is the 'Bit mask' from doc
+    uint32 user_mosi;           // 0x2703:0x00 (32 bits)
+    int32  velocity_offset;     // 0x60B1:0x00 (32 bits)
+} somanet_rx_pdo_enhanced_t; // Total size: 2+1+2+4+4+2+4+4+4+4+4 = 35 bytes (280 bits)
 
 typedef struct PACKED
 {
-    uint16 statusword;                  // 0x6041:0x00
-    int8   modes_of_operation_display;  // 0x6061:0x00
-    int32  position_actual_value;       // 0x6064:0x00
-    int32  velocity_actual_value;       // 0x6069:0x00
-    int16  torque_actual_value;         // 0x6077:0x00
-    int16  current_actual_value;        // 0x6078:0x00
-    uint32 physical_inputs;             // 0x60FD:0x01
-    uint32 tuning_status;               // 0x2702:0x00
-} somanet_tx_pdo_enhanced_t;
+    uint16 statusword;                  // 0x6041:0x00 (16 bits)
+    int8   modes_of_operation_display;  // 0x6061:0x00 (8 bits)
+    int32  position_actual_value;       // 0x6064:0x00 (32 bits)
+    int32  velocity_actual_value;       // 0x606C:0x00 (32 bits)
+    int16  torque_actual_value;         // 0x6077:0x00 (16 bits)
+    uint16 analog_input_1;              // 0x2401:0x00 (16 bits)
+    uint16 analog_input_2;              // 0x2402:0x00 (16 bits)
+    uint16 analog_input_3;              // 0x2403:0x00 (16 bits)
+    uint16 analog_input_4;              // 0x2404:0x00 (16 bits)
+    uint32 tuning_status;               // 0x2702:0x00 (32 bits)
+    uint32 digital_inputs;              // 0x60FD:0x00 (32 bits)
+    uint32 user_miso;                   // 0x2704:0x00 (32 bits)
+    uint32 timestamp;                   // 0x20F0:0x00 (32 bits)
+    int32  position_demand_internal_value; // 0x60FC:0x00 (32 bits)
+    int32  velocity_demand_value;       // 0x606B:0x00 (32 bits)
+    int16  torque_demand;               // 0x6074:0x00 (16 bits)
+} somanet_tx_pdo_enhanced_t; // Total size: 2+1+4+4+2+2+2+2+2+4+4+4+4+4+4+2 = 47 bytes (376 bits)
 
-/*
-// Updated PDO structure definitions to match the enhanced mapping
-typedef struct PACKED
-{
-    uint16 controlword;         // 0x6040:0x00 (16-bit) = 2 bytes
-    int8   modes_of_operation;  // 0x6060:0x00 (8-bit)  = 1 byte
-    int16  target_torque;       // 0x6071:0x00 (16-bit) = 2 bytes
-    int32  target_position;     // 0x607A:0x00 (32-bit) = 4 bytes
-} somanet_rx_pdo_enhanced_t;
-
-typedef struct PACKED
-{
-    uint16 statusword;                  // 0x6041:0x00 (16-bit) = 2 bytes
-    int8   modes_of_operation_display;  // 0x6061:0x00 (8-bit)  = 1 byte
-    int32  position_actual_value;       // 0x6064:0x00 (32-bit) = 4 bytes
-    int16  torque_actual_value;         // 0x6077:0x00 (16-bit) = 2 bytes
-} somanet_tx_pdo_enhanced_t;
-*/
 // Pointers to the PDO data in the IOmap
-somanet_rx_pdo_enhanced_t *somanet_outputs; // Initialize to NULL, remove if it causes errors
-somanet_tx_pdo_enhanced_t *somanet_inputs; // Initialize to NULL, remove if it causes errors
+somanet_rx_pdo_enhanced_t *somanet_outputs;
+somanet_tx_pdo_enhanced_t *somanet_inputs;
 
 // Mutex for protecting PDO data access
 static pthread_mutex_t pdo_mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -563,7 +557,7 @@ int soem_interface_configure_pdo_mapping_enhanced(uint16_t slave_idx, uint16_t p
                                                   uint16_t pdo_map_idx, uint32_t *mapped_objects, 
                                                   uint8_t num_mapped_objects) {
     uint8_t zero_val = 0;
-    uint8_t original_assign_val = 1;
+    uint8_t original_assign_val = 1; // This is typically 1 to enable assignment
     uint8_t current_num_objects = 0;
     uint32_t current_object = 0;
     
@@ -598,13 +592,14 @@ int soem_interface_configure_pdo_mapping_enhanced(uint16_t slave_idx, uint16_t p
         }
         
         if (mapping_matches) {
-            printf("SOEM_Interface: Current PDO mapping already matches desired configuration.\n");
+            printf("SOEM_Interface: Current PDO mapping already matches desired configuration. Skipping write.\n");
             return 0; // No reconfiguration needed
         }
     }
 
     // Step 2: Disable PDO assignment first (as per Synapticon documentation)
-    printf("SOEM_Interface: Disabling PDO assignment...\n");
+    // Set subindex 0 of PDO assign to 0 to disable assignment
+    printf("SOEM_Interface: Disabling PDO assignment (0x%04X:0x00 = 0)...\n", pdo_assign_idx);
     if (soem_interface_write_sdo(slave_idx, pdo_assign_idx, 0x00, sizeof(zero_val), &zero_val) != 0) {
         fprintf(stderr, "SOEM_Interface: Failed to disable PDO assignment.\n");
         return -1;
@@ -612,7 +607,7 @@ int soem_interface_configure_pdo_mapping_enhanced(uint16_t slave_idx, uint16_t p
     usleep(50000); // 50ms delay
 
     // Step 3: Disable the PDO mapping object (set subindex 0 to 0)
-    printf("SOEM_Interface: Disabling PDO mapping object...\n");
+    printf("SOEM_Interface: Disabling PDO mapping object (0x%04X:0x00 = 0)...\n", pdo_map_idx);
     if (soem_interface_write_sdo(slave_idx, pdo_map_idx, 0x00, sizeof(zero_val), &zero_val) != 0) {
         fprintf(stderr, "SOEM_Interface: Failed to disable PDO mapping.\n");
         return -1;
@@ -620,7 +615,7 @@ int soem_interface_configure_pdo_mapping_enhanced(uint16_t slave_idx, uint16_t p
     usleep(50000); // 50ms delay
 
     // Step 4: Write new mapping objects (subindices 1 to n)
-    printf("SOEM_Interface: Writing %d new mapping objects...\n", num_mapped_objects);
+    printf("SOEM_Interface: Writing %d new mapping objects to 0x%04X...\n", num_mapped_objects, pdo_map_idx);
     for (uint8_t i = 0; i < num_mapped_objects; i++) {
         printf("SOEM_Interface: Writing object %d: 0x%08X\n", i + 1, mapped_objects[i]);
         if (soem_interface_write_sdo(slave_idx, pdo_map_idx, i + 1, sizeof(uint32_t), &mapped_objects[i]) != 0) {
@@ -631,7 +626,7 @@ int soem_interface_configure_pdo_mapping_enhanced(uint16_t slave_idx, uint16_t p
     }
 
     // Step 5: Enable the PDO mapping by setting subindex 0 to number of objects
-    printf("SOEM_Interface: Enabling PDO mapping with %d objects...\n", num_mapped_objects);
+    printf("SOEM_Interface: Enabling PDO mapping (0x%04X:0x00 = %d objects)...\n", pdo_map_idx, num_mapped_objects);
     if (soem_interface_write_sdo(slave_idx, pdo_map_idx, 0x00, sizeof(num_mapped_objects), &num_mapped_objects) != 0) {
         fprintf(stderr, "SOEM_Interface: Failed to enable PDO mapping.\n");
         return -1;
@@ -639,8 +634,13 @@ int soem_interface_configure_pdo_mapping_enhanced(uint16_t slave_idx, uint16_t p
     usleep(50000); // 50ms delay
 
     // Step 6: Re-enable PDO assignment
-    printf("SOEM_Interface: Re-enabling PDO assignment...\n");
-    if (soem_interface_write_sdo(slave_idx, pdo_assign_idx, 0x00, sizeof(original_assign_val), &original_assign_val) != 0) {
+    // Set subindex 0 of PDO assign to 1 (or the actual PDO index, e.g., 0x1600 or 0x1A00)
+    // For Synapticon, typically you write the PDO map index to subindex 1 of the assign object.
+    // The value 1 for original_assign_val is likely incorrect for re-enabling assignment.
+    // It should be the PDO map index itself (e.g., 0x1600 for RxPDO, 0x1A00 for TxPDO)
+    uint16_t pdo_map_idx_u16 = pdo_map_idx; // Cast to uint16_t for the SDO write
+    printf("SOEM_Interface: Re-enabling PDO assignment (0x%04X:0x00 = 0x%04X)...\n", pdo_assign_idx, pdo_map_idx_u16);
+    if (soem_interface_write_sdo(slave_idx, pdo_assign_idx, 0x00, sizeof(pdo_map_idx_u16), &pdo_map_idx_u16) != 0) {
         fprintf(stderr, "SOEM_Interface: Failed to re-enable PDO assignment.\n");
         return -1;
     }
@@ -738,37 +738,65 @@ int configure_somanet_pdo_mapping_enhanced(uint16_t slave_idx) {
         return 0; // Continue with default mapping
     }
     
-    // Use minimal essential mapping to avoid size issues
+    // Define the full RxPDO mapping based on PDO_mapping.md (SM2 outputs)
     uint32_t rxpdo_mapping[] = {
-        0x60400010,  // Controlword (16-bit)
-        0x60600008,  // Modes of operation (8-bit)
-        0x60710010,  // Target torque (16-bit)
-        0x607A0020   // Target position (32-bit)
+        0x60400010,  // Controlword (16 bits)
+        0x60600008,  // Modes of operation (8 bits)
+        0x60710010,  // Target Torque (16 bits)
+        0x607A0020,  // Target position (32 bits)
+        0x60FF0020,  // Target velocity (32 bits)
+        0x60B20010,  // Torque offset (16 bits)
+        0x27010020,  // Tuning command (32 bits)
+        0x60FE0120,  // Physical outputs (32 bits)
+        0x60FE0220,  // Bit mask (32 bits)
+        0x27030020,  // User MOSI (32 bits)
+        0x60B10020   // Velocity offset (32 bits)
     };
     
+    // Define the full TxPDO mapping based on PDO_mapping.md (SM3 inputs)
     uint32_t txpdo_mapping[] = {
-        0x60410010,  // Statusword (16-bit)
-        0x60610008,  // Modes of operation display (8-bit)
-        0x60640020,  // Position actual value (32-bit)
-        0x60770010   // Torque actual value (16-bit)
+        0x60410010,  // Statusword (16 bits)
+        0x60610008,  // Modes of operation display (8 bits)
+        0x60640020,  // Position actual value (32 bits)
+        0x606C0020,  // Velocity actual value (32 bits)
+        0x60770010,  // Torque actual value (16 bits)
+        0x24010010,  // Analog input 1 (16 bits)
+        0x24020010,  // Analog input 2 (16 bits)
+        0x24030010,  // Analog input 3 (16 bits)
+        0x24040010,  // Analog input 4 (16 bits)
+        0x27020020,  // Tuning status (32 bits)
+        0x60FD0020,  // Digital inputs (32 bits)
+        0x27040020,  // User MISO (32 bits)
+        0x20F00020,  // Timestamp (32 bits)
+        0x60FC0020,  // Position demand internal value (32 bits)
+        0x606B0020,  // Velocity demand value (32 bits)
+        0x60740010   // Torque demand (16 bits)
     };
     
-    // Calculate and verify sizes
-    uint16_t rxpdo_size_bits = 16 + 8 + 16 + 32; // 72 bits = 9 bytes
-    uint16_t txpdo_size_bits = 16 + 8 + 32 + 16; // 72 bits = 9 bytes
+    // Calculate and verify sizes (for logging purposes)
+    uint16_t rxpdo_size_bits = 0;
+    for (int i = 0; i < sizeof(rxpdo_mapping)/sizeof(uint32_t); i++) {
+        rxpdo_size_bits += (rxpdo_mapping[i] & 0xFF);
+    }
+    uint16_t txpdo_size_bits = 0;
+    for (int i = 0; i < sizeof(txpdo_mapping)/sizeof(uint32_t); i++) {
+        txpdo_size_bits += (txpdo_mapping[i] & 0xFF);
+    }
     
-    printf("SOEM_Interface: Minimal PDO mapping - RxPDO: %d bits, TxPDO: %d bits\n", 
-           rxpdo_size_bits, txpdo_size_bits);
+    printf("SOEM_Interface: Full PDO mapping - RxPDO: %d bits (%d bytes), TxPDO: %d bits (%d bytes)\n", 
+           rxpdo_size_bits, rxpdo_size_bits/8, txpdo_size_bits, txpdo_size_bits/8);
     
-    // Try to configure with minimal mapping
+    // Try to configure with full mapping
     if (soem_interface_configure_pdo_mapping_enhanced(slave_idx, 0x1C12, 0x1600, 
                                                      rxpdo_mapping, sizeof(rxpdo_mapping)/sizeof(uint32_t)) != 0) {
-        printf("SOEM_Interface: RxPDO mapping failed, using device defaults\n");
+        fprintf(stderr, "SOEM_Interface: RxPDO mapping failed, cannot proceed.\n");
+        return -1; // Critical error, cannot continue without correct RxPDO
     }
     
     if (soem_interface_configure_pdo_mapping_enhanced(slave_idx, 0x1C13, 0x1A00, 
                                                      txpdo_mapping, sizeof(txpdo_mapping)/sizeof(uint32_t)) != 0) {
-        printf("SOEM_Interface: TxPDO mapping failed, using device defaults\n");
+        fprintf(stderr, "SOEM_Interface: TxPDO mapping failed, cannot proceed.\n");
+        return -1; // Critical error, cannot continue without correct TxPDO
     }
     
     printf("SOEM_Interface: PDO mapping configuration completed\n");
@@ -814,7 +842,8 @@ int soem_interface_init_enhanced(const char *ifname) {
 
     // Configure PDO mapping with improved robustness
     if (configure_somanet_pdo_mapping_enhanced(slave_idx) != 0) {
-        printf("SOEM_Interface: PDO mapping configuration had issues, continuing with defaults\n");
+        fprintf(stderr, "SOEM_Interface: Critical: PDO mapping configuration failed, cannot proceed.\n");
+        return -1;
     }
 
     // Configure distributed clocks
