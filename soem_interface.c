@@ -6,6 +6,7 @@
 #include <pthread.h>
 #include <stdarg.h>
 #include <math.h>
+#include <stdbool.h>
 
 // --- SOEM Library Includes ---
 #include "ethercat.h"
