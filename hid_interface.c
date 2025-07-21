@@ -13,11 +13,17 @@
 #include <time.h>
 #include <sys/time.h>
 #include <sys/stat.h>
+#include <linux/time.h>
 
 #define HID_DEVICE_PATH "/dev/hidg0"
 #define HID_REPORT_SIZE 64
 #define HID_SEND_INTERVAL_MS 16  // Send reports every 16ms (62.5Hz) - more reasonable for USB HID
 #define USB_RECONNECT_DELAY_MS 500  // Wait 500ms before trying to reconnect
+
+
+// Encoder
+static float center_position = 0.0f;  // Store the center position
+static int position_initialized = 0;  // Flag to track if center has been set
 
 // FFB Effect Queue
 #define FFB_EFFECT_QUEUE_SIZE 16
@@ -425,9 +431,13 @@ static void* _usb_ffb_reception_thread(void* arg) {
 int hid_interface_init() {
     printf("HIDInterface: Initializing HID interface...\n");
     
+    // Set initial center position
+    center_position = soem_interface_get_current_position();
+    position_initialized = 1;
+    printf("HIDInterface: Center position set to: %.2f\n", center_position);
+    
     if (try_open_hid_device() != 0) {
         printf("HIDInterface: Warning - Could not open HID device initially. Will try to reconnect later.\n");
-        // Don't return error - we'll try to reconnect during operation
     }
 
     printf("HIDInterface: HID interface initialized.\n");
@@ -440,15 +450,24 @@ static void* _gamepad_report_loop(void* arg) {
 
     while (hid_running) {
         float raw_pos = soem_interface_get_current_position();
-        float revolutions = raw_pos / 4096.0f;              // encoder to revs
-        float normalized = fmodf(revolutions, 1.0f);        // wrap to [0,1)
-        if (normalized > 0.5f) normalized -= 1.0f;           // wrap to [-0.5, 0.5]
-        float output = normalized * 2.0f;                   // final [-1.0, 1.0]
-
-        //printf("Sending encoder pos: %.2f (scaled: %d)\n", output, (int)(output * 32767));
+        
+        // Calculate relative position from center
+        float relative_pos = raw_pos - center_position;
+        
+        // Convert to revolutions (assuming 4096 counts per revolution)
+        float revolutions = relative_pos / 4096.0f;
+        
+        // Normalize to [-0.5, 0.5] range (half revolution each direction)
+        float normalized = fmodf(revolutions + 0.5f, 1.0f) - 0.5f;
+        
+        // Scale to [-1.0, 1.0] range for full steering range
+        float output = normalized * 2.0f;
+        
+        // Clamp to ensure we don't exceed bounds
+        if (output > 1.0f) output = 1.0f;
+        if (output < -1.0f) output = -1.0f;
 
         hid_interface_send_gamepad_report(output, 0);
-
         usleep(5000);  // ~5ms = 200 Hz
     }
 
@@ -541,8 +560,7 @@ void hid_interface_send_gamepad_report(float position, unsigned int buttons) {
 
     // Only send if connected
     if (!usb_connected) {
-        printf("HID: Not connected, skipping report\n");
-        return;
+        return; // Removed debug print to reduce spam
     }
 
     pthread_mutex_lock(&hidg_fd_mutex);
@@ -550,8 +568,7 @@ void hid_interface_send_gamepad_report(float position, unsigned int buttons) {
     pthread_mutex_unlock(&hidg_fd_mutex);
 
     if (fd < 0) {
-        printf("HID: Invalid file descriptor\n");
-        return;
+        return; // Removed debug print to reduce spam
     }
 
     // Clear the entire report buffer
@@ -561,12 +578,18 @@ void hid_interface_send_gamepad_report(float position, unsigned int buttons) {
     // Set Report ID
     report[0] = 0x01;
     
-    // Convert position to 16-bit signed value
+    // Convert position to 16-bit signed value using FULL range
     // Clamp position to [-1.0, 1.0] range
     if (position > 1.0f) position = 1.0f;
     if (position < -1.0f) position = -1.0f;
     
-    int16_t scaled_pos = (int16_t)(position * 32767.0f);
+    // Use full signed 16-bit range: -32768 to +32767
+    int16_t scaled_pos;
+    if (position >= 0.0f) {
+        scaled_pos = (int16_t)(position * 32767.0f);
+    } else {
+        scaled_pos = (int16_t)(position * 32768.0f);
+    }
     
     // Pack position as little-endian 16-bit
     report[1] = scaled_pos & 0xFF;        // Low byte
@@ -576,11 +599,12 @@ void hid_interface_send_gamepad_report(float position, unsigned int buttons) {
     report[3] = buttons & 0xFF;           // Low byte of buttons
     report[4] = (buttons >> 8) & 0xFF;    // High byte of buttons
     
-    // Debug output
-    printf("HID Report: ID=0x%02X, Pos=%.3f->%d (0x%04X), Buttons=0x%04X\n", 
-           report[0], position, scaled_pos, (uint16_t)scaled_pos, buttons);
-    printf("HID Bytes: [%02X %02X %02X %02X %02X ...]\n", 
-           report[0], report[1], report[2], report[3], report[4]);
+    // Debug output (reduced frequency to avoid spam)
+    static int debug_counter = 0;
+    if (++debug_counter % 200 == 0) { // Print every 200 reports (about once per second)
+        printf("HID Report: Pos=%.3f->%d (0x%04X), Buttons=0x%04X\n", 
+               position, scaled_pos, (uint16_t)scaled_pos, buttons);
+    }
 
     // Send the report
     ssize_t bytes_written = write(fd, report, HID_REPORT_SIZE);
@@ -604,51 +628,62 @@ void hid_interface_send_gamepad_report(float position, unsigned int buttons) {
         }
     } else {
         consecutive_write_failures = 0;
-        if (bytes_written != HID_REPORT_SIZE) {
-            printf("HID: Partial write: %zd/%d bytes\n", bytes_written, HID_REPORT_SIZE);
-        }
     }
+}
+
+// Function to recenter the wheel position
+void hid_interface_recenter_wheel() {
+    center_position = soem_interface_get_current_position();
+    printf("HIDInterface: Wheel recentered to position: %.2f\n", center_position);
+}
+
+// Function to get current position relative to center
+float hid_interface_get_relative_position() {
+    if (!position_initialized) return 0.0f;
+    
+    float raw_pos = soem_interface_get_current_position();
+    float relative_pos = raw_pos - center_position;
+    float revolutions = relative_pos / 4096.0f;
+    float normalized = fmodf(revolutions + 0.5f, 1.0f) - 0.5f;
+    return normalized * 2.0f;
 }
 
 // Add this test function to verify your encoder values
 void hid_interface_test_encoder_values() {
-    printf("=== Testing Encoder Value Conversion ===\n");
+    printf("=== Testing Encoder Value Conversion (Full Signed Range) ===\n");
     
     float test_positions[] = {-1.0f, -0.5f, 0.0f, 0.5f, 1.0f};
     int num_tests = sizeof(test_positions) / sizeof(test_positions[0]);
     
     for (int i = 0; i < num_tests; i++) {
         float pos = test_positions[i];
-        int16_t scaled = (int16_t)(pos * 32767.0f);
+        int16_t scaled;
+        
+        if (pos >= 0.0f) {
+            scaled = (int16_t)(pos * 32767.0f);
+        } else {
+            scaled = (int16_t)(pos * 32768.0f);
+        }
         
         printf("Position %.1f -> Scaled %d (0x%04X) -> Bytes [0x%02X, 0x%02X]\n",
                pos, scaled, (uint16_t)scaled, 
                scaled & 0xFF, (scaled >> 8) & 0xFF);
     }
     
-    printf("Current encoder reading:\n");
-    float raw_pos = soem_interface_get_current_position();
-    float revolutions = raw_pos / 4096.0f;
-    float normalized = fmodf(revolutions, 1.0f);
-    if (normalized > 0.5f) normalized -= 1.0f;
-    float output = normalized * 2.0f;
-    
-    printf("Raw: %.2f -> Revolutions: %.3f -> Normalized: %.3f -> Output: %.3f\n",
-           raw_pos, revolutions, normalized, output);
-    
-    int16_t scaled = (int16_t)(output * 32767.0f);
-    printf("Final scaled value: %d (0x%04X)\n", scaled, (uint16_t)scaled);
-}
-
-/**
- * @brief Enable or disable rate limiting for gamepad reports
- * @param enable 1 to enable rate limiting, 0 to disable
- */
-void hid_interface_set_rate_limiting(int enable) {
-    rate_limit_enabled = enable;
-    if (!enable) {
-        last_send_time.tv_sec = 0;
-        last_send_time.tv_nsec = 0;
+    printf("\nCurrent encoder reading:\n");
+    if (position_initialized) {
+        float relative_pos = hid_interface_get_relative_position();
+        printf("Center: %.2f, Current relative: %.3f\n", center_position, relative_pos);
+        
+        int16_t scaled;
+        if (relative_pos >= 0.0f) {
+            scaled = (int16_t)(relative_pos * 32767.0f);
+        } else {
+            scaled = (int16_t)(relative_pos * 32768.0f);
+        }
+        printf("Final scaled value: %d (0x%04X)\n", scaled, (uint16_t)scaled);
+    } else {
+        printf("Position not initialized yet\n");
     }
 }
 

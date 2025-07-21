@@ -7,11 +7,12 @@
 #include <string.h>
 #include <math.h>
 #include <limits.h>
-#include <sys/mman.h>    // For memory locking
-#include <sys/resource.h> // For priority setting
+#include <sys/mman.h>       // For memory locking
+#include <sys/resource.h>   // For priority setting
 #include <pthread.h>
 #include <errno.h>
-#include <sched.h>       // For real-time scheduling
+#include <sched.h>          // For real-time scheduling
+#include <termios.h>        // Keyboard input 
 
 // Application libraries
 #include "hid_interface.h"
@@ -32,6 +33,22 @@
 static volatile int running = 1;
 static volatile int emergency_stop = 0;
 static volatile int pause_control = 0;
+
+//Keyboard inputs
+struct termios orig_termios;
+
+int check_ctrl_combinations() {
+    char ch;
+    if (read(STDIN_FILENO, &ch, 1) == 1) {
+        switch (ch) {
+            case 18: // Ctrl+R
+                printf("Ctrl+R pressed - recentering wheel!\n");
+                hid_interface_recenter_wheel();
+                return 1;
+        }
+    }
+    return 0;
+}
 
 // Performance monitoring structure
 typedef struct {
@@ -89,6 +106,7 @@ static int apply_safety_checks(app_state_t *state);
 static void maintain_loop_timing(const struct timespec *start_time, const struct timespec *end_time);
 static long timespec_diff_ns(const struct timespec *start, const struct timespec *end);
 
+
 // Signal handlers
 static void sigint_handler(int signum) {
     printf("\nCaught SIGINT (Ctrl+C), initiating graceful shutdown...\n");
@@ -131,6 +149,26 @@ static void setup_real_time_scheduling(void) {
     if (ret != 0) {
         perror("Warning: Failed to set process priority");
     }
+}
+
+// Setup Keyboard input for centering wheel
+void disable_raw_mode() {
+    tcsetattr(STDIN_FILENO, TCSAFLUSH, &orig_termios);
+}
+
+void enable_raw_mode() {
+    tcgetattr(STDIN_FILENO, &orig_termios);
+    atexit(disable_raw_mode);
+    
+    struct termios raw = orig_termios;
+    raw.c_iflag &= ~(BRKINT | ICRNL | INPCK | ISTRIP | IXON);
+    raw.c_oflag &= ~(OPOST);
+    raw.c_cflag |= (CS8);
+    raw.c_lflag &= ~(ECHO | ICANON | IEXTEN | ISIG);
+    raw.c_cc[VMIN] = 0;
+    raw.c_cc[VTIME] = 1;
+    
+    tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw);
 }
 
 // Setup signal handlers
