@@ -35,6 +35,7 @@
 #define CIA402_CONTROLWORD_QS           0x0004  // Quick stop
 #define CIA402_CONTROLWORD_EO           0x0008  // Enable operation
 #define CIA402_CONTROLWORD_FAULT_RESET  0x0080  // Fault reset
+#define ENCODER_COUNTS_PER_REV          4096.0f // Counts per revolution
 
 // --- SOEM Global Variables ---
 char IOmap[4096];
@@ -483,7 +484,7 @@ void *ecat_loop(void *ptr) {
                 current_velocity_f = (float)somanet_inputs->velocity_actual_value;
             }
             pthread_mutex_unlock(&pdo_mutex);
-            
+
             // Initialize state machine once
             if (!state_machine_initialized && somanet_inputs && somanet_outputs) {
                 if (perform_cia402_transition_to_operational(slave_idx) == 0) {
@@ -915,12 +916,11 @@ void soem_interface_send_and_receive_pdo(float target_torque) {
     pthread_mutex_unlock(&pdo_mutex);
 }
 
-float soem_interface_get_current_position() {
-    float position;
+float soem_interface_get_current_position(void) {
     pthread_mutex_lock(&pdo_mutex);
-    position = current_position_f;
+    float pos = current_position_f;
     pthread_mutex_unlock(&pdo_mutex);
-    return position;
+    return pos;
 }
 
 float soem_interface_get_current_velocity() {

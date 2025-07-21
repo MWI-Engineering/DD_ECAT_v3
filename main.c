@@ -181,7 +181,8 @@ static void cleanup_and_exit(int exit_code) {
 
 // Convert position to normalized range for HID report
 static float normalize_position_for_hid(float position_degrees) {
-    // Clamp to range
+    // Clamp to range'
+    
     if (position_degrees > MAX_STEERING_ANGLE) position_degrees = MAX_STEERING_ANGLE;
     if (position_degrees < -MAX_STEERING_ANGLE) position_degrees = -MAX_STEERING_ANGLE;
     

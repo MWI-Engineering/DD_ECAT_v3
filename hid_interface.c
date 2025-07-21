@@ -1,5 +1,7 @@
 // hid_interface.c - Improved version with better error handling and USB reconnection
 #include "hid_interface.h"
+#include "soem_interface.h"
+//
 #include "ffb_types.h"
 #include <stdio.h>
 #include <pthread.h>
@@ -105,6 +107,8 @@ static int try_open_hid_device() {
     pthread_mutex_unlock(&hidg_fd_mutex);
     return 0;
 }
+
+static pthread_t gamepad_report_thread;
 
 // Check if we should attempt reconnection
 static int should_attempt_reconnect() {
@@ -430,6 +434,28 @@ int hid_interface_init() {
     return 0;
 }
 
+static void* _gamepad_report_loop(void* arg) {
+    (void)arg;
+    printf("HIDInterface: Gamepad report thread started\n");
+
+    while (hid_running) {
+        float raw_pos = soem_interface_get_current_position();
+        float revolutions = raw_pos / 4096.0f;              // encoder to revs
+        float normalized = fmodf(revolutions, 1.0f);        // wrap to [0,1)
+        if (normalized > 0.5f) normalized -= 1.0f;           // wrap to [-0.5, 0.5]
+        float output = normalized * 2.0f;                   // final [-1.0, 1.0]
+
+        //printf("Sending encoder pos: %.2f (scaled: %d)\n", output, (int)(output * 32767));
+
+        hid_interface_send_gamepad_report(output, 0);
+
+        usleep(5000);  // ~5ms = 200 Hz
+    }
+
+    printf("HIDInterface: Gamepad report thread stopped\n");
+    return NULL;
+}
+
 /**
  * @brief Starts the HID communication threads.
  * @return 0 on success, -1 on failure.
@@ -438,6 +464,11 @@ int hid_interface_start() {
     hid_running = 1;
     if (pthread_create(&ffb_reception_thread, NULL, _usb_ffb_reception_thread, NULL) != 0) {
         perror("HIDInterface: Failed to create FFB reception thread");
+        return -1;
+    }
+    // Send commands
+    if (pthread_create(&gamepad_report_thread, NULL, _gamepad_report_loop, NULL) != 0) {
+        perror("HIDInterface: Failed to create gamepad report thread");
         return -1;
     }
     printf("HIDInterface: Started FFB reception thread.\n");
@@ -451,6 +482,10 @@ void hid_interface_stop() {
     hid_running = 0;
     if (ffb_reception_thread) {
         pthread_join(ffb_reception_thread, NULL);
+    }
+    
+    if (gamepad_report_thread) {
+        pthread_join(gamepad_report_thread, NULL);
     }
 
     safe_close_hid_device();
@@ -506,6 +541,7 @@ void hid_interface_send_gamepad_report(float position, unsigned int buttons) {
 
     // Only send if connected
     if (!usb_connected) {
+        printf("HID: Not connected, skipping report\n");
         return;
     }
 
@@ -513,45 +549,95 @@ void hid_interface_send_gamepad_report(float position, unsigned int buttons) {
     int fd = hidg_fd;
     pthread_mutex_unlock(&hidg_fd_mutex);
 
-    if (fd < 0) return;
+    if (fd < 0) {
+        printf("HID: Invalid file descriptor\n");
+        return;
+    }
 
-    uint8_t report[HID_REPORT_SIZE] = {0};
+    // Clear the entire report buffer
+    uint8_t report[HID_REPORT_SIZE];
+    memset(report, 0, HID_REPORT_SIZE);
     
-    // Format the report
+    // Set Report ID
+    report[0] = 0x01;
+    
+    // Convert position to 16-bit signed value
+    // Clamp position to [-1.0, 1.0] range
+    if (position > 1.0f) position = 1.0f;
+    if (position < -1.0f) position = -1.0f;
+    
     int16_t scaled_pos = (int16_t)(position * 32767.0f);
-    report[0] = scaled_pos & 0xFF;
-    report[1] = (scaled_pos >> 8) & 0xFF;
-    report[2] = buttons & 0xFF;
-    report[3] = (buttons >> 8) & 0xFF;
+    
+    // Pack position as little-endian 16-bit
+    report[1] = scaled_pos & 0xFF;        // Low byte
+    report[2] = (scaled_pos >> 8) & 0xFF; // High byte
+    
+    // Pack buttons as little-endian 16-bit
+    report[3] = buttons & 0xFF;           // Low byte of buttons
+    report[4] = (buttons >> 8) & 0xFF;    // High byte of buttons
+    
+    // Debug output
+    printf("HID Report: ID=0x%02X, Pos=%.3f->%d (0x%04X), Buttons=0x%04X\n", 
+           report[0], position, scaled_pos, (uint16_t)scaled_pos, buttons);
+    printf("HID Bytes: [%02X %02X %02X %02X %02X ...]\n", 
+           report[0], report[1], report[2], report[3], report[4]);
 
+    // Send the report
     ssize_t bytes_written = write(fd, report, HID_REPORT_SIZE);
     if (bytes_written < 0) {
         if (errno == EAGAIN || errno == EWOULDBLOCK) {
-            // Device buffer is full - this is normal, just skip
             static int eagain_count = 0;
             if (++eagain_count % 1000 == 0) {
-                printf("HIDInterface: Device buffer full (%d times), consider reducing report rate\n", eagain_count);
+                printf("HID: Device buffer full (%d times)\n", eagain_count);
             }
         } else if (errno == EPIPE || errno == ECONNRESET || errno == ESHUTDOWN) {
-            // Connection lost
             consecutive_write_failures++;
             total_write_errors++;
             
             if (consecutive_write_failures > 5) {
-                printf("HIDInterface: USB connection lost (consecutive failures: %d)\n", consecutive_write_failures);
+                printf("HID: USB connection lost (consecutive failures: %d)\n", consecutive_write_failures);
                 safe_close_hid_device();
             }
         } else {
             total_write_errors++;
-            static int other_error_count = 0;
-            if (++other_error_count % 100 == 0) {
-                printf("HIDInterface: Write error (%d times): %s\n", other_error_count, strerror(errno));
-            }
+            printf("HID: Write error: %s (errno=%d)\n", strerror(errno), errno);
         }
     } else {
-        // Successful write
         consecutive_write_failures = 0;
+        if (bytes_written != HID_REPORT_SIZE) {
+            printf("HID: Partial write: %zd/%d bytes\n", bytes_written, HID_REPORT_SIZE);
+        }
     }
+}
+
+// Add this test function to verify your encoder values
+void hid_interface_test_encoder_values() {
+    printf("=== Testing Encoder Value Conversion ===\n");
+    
+    float test_positions[] = {-1.0f, -0.5f, 0.0f, 0.5f, 1.0f};
+    int num_tests = sizeof(test_positions) / sizeof(test_positions[0]);
+    
+    for (int i = 0; i < num_tests; i++) {
+        float pos = test_positions[i];
+        int16_t scaled = (int16_t)(pos * 32767.0f);
+        
+        printf("Position %.1f -> Scaled %d (0x%04X) -> Bytes [0x%02X, 0x%02X]\n",
+               pos, scaled, (uint16_t)scaled, 
+               scaled & 0xFF, (scaled >> 8) & 0xFF);
+    }
+    
+    printf("Current encoder reading:\n");
+    float raw_pos = soem_interface_get_current_position();
+    float revolutions = raw_pos / 4096.0f;
+    float normalized = fmodf(revolutions, 1.0f);
+    if (normalized > 0.5f) normalized -= 1.0f;
+    float output = normalized * 2.0f;
+    
+    printf("Raw: %.2f -> Revolutions: %.3f -> Normalized: %.3f -> Output: %.3f\n",
+           raw_pos, revolutions, normalized, output);
+    
+    int16_t scaled = (int16_t)(output * 32767.0f);
+    printf("Final scaled value: %d (0x%04X)\n", scaled, (uint16_t)scaled);
 }
 
 /**
