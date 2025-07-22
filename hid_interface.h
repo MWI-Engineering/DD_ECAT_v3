@@ -11,8 +11,9 @@ extern volatile int hid_running;
 int hid_interface_init();
 int hid_interface_start();
 void hid_interface_stop();
-int hid_interface_get_ffb_effect(ffb_effect_t *effect_out);
-void hid_interface_send_gamepad_report(float position, unsigned int buttons);
+int hid_interface_get_ffb_effect(ffb_motor_effect_t *effect_out);
+int hid_interface_send_gamepad_report(float position, unsigned int buttons);
+//void hid_interface_send_gamepad_report(float position, unsigned int buttons);
 float hid_interface_get_relative_position(void);
 
 // Configuration functions

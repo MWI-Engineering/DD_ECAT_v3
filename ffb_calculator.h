@@ -6,7 +6,7 @@
 // FFB calculator function prototypes
 void ffb_calculator_init(void);
 void ffb_calculator_update(float position, float velocity, float acceleration);
-void ffb_calculator_process_effect(const ffb_effect_t *effect);
+void ffb_calculator_process_effect(const ffb_motor_effect_t *effect);
 float ffb_calculator_get_torque(void);
 void ffb_calculator_set_gains(float spring_gain, float damper_gain, float inertia_gain);
 
@@ -22,6 +22,6 @@ void ffb_calculator_init();
  * @param current_velocity The current angular velocity of the steering wheel (for damper/inertia).
  * @return The calculated desired torque value.
  */
-float ffb_calculator_calculate_torque(const ffb_effect_t *effect, float current_position, float current_velocity);
+float ffb_calculator_calculate_torque(const ffb_motor_effect_t *effect, float current_position, float current_velocity);
 
 #endif // FFB_CALCULATOR_H

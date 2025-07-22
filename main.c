@@ -18,7 +18,7 @@
 #include "hid_interface.h"
 #include "ffb_calculator.h"
 #include "soem_interface.h"
-#include "ffb_types.h"
+//#include "ffb_types.h"
 
 // Configuration constants
 #define MAIN_LOOP_FREQUENCY_HZ 1000
@@ -74,7 +74,7 @@ typedef struct {
     unsigned int button_states;
     
     // FFB state
-    ffb_effect_t current_ffb_effect;
+    ffb_motor_effect_t current_ffb_effect;
     int effect_available;
     
     // Communication status
@@ -426,7 +426,7 @@ int main(int argc, char *argv[]) {
         
         // 3. Get FFB commands from PC
         app_state.effect_available = hid_interface_get_ffb_effect(&app_state.current_ffb_effect);
-        const ffb_effect_t *effect_ptr = app_state.effect_available ? &app_state.current_ffb_effect : NULL;
+        const ffb_motor_effect_t *effect_ptr = app_state.effect_available ? &app_state.current_ffb_effect : NULL;
         
         // 4. Calculate desired torque
         app_state.desired_torque = ffb_calculator_calculate_torque(

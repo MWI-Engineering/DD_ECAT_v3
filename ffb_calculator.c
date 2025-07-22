@@ -4,6 +4,7 @@
 #include <math.h>  // For fmax, fmin, sin, cos
 #include <stdint.h>
 #include <sys/time.h> // For gettimeofday
+#include <time.h>
 
 // Define pi value 
 #ifndef M_PI
@@ -45,7 +46,7 @@ void ffb_calculator_init() {
  * @param current_velocity The current angular velocity of the steering wheel (for damper/inertia).
  * @return The calculated desired torque value.
  */
-float ffb_calculator_calculate_torque(const ffb_effect_t *effect, float current_position, float current_velocity) {
+float ffb_calculator_calculate_torque(const ffb_motor_effect_t *effect, float current_position, float current_velocity) {
     float desired_torque = 0.0f;
 
     if (effect != NULL) {
