@@ -7,7 +7,7 @@ cd g1
 echo 0x1209 > idVendor       # InterBiometrics (open/hobbyist)
 echo 0x4711 > idProduct      # Your product ID
 echo 0x0100 > bcdDevice
-echo 0x0200 > bcdUSB
+echo 0x0300 > bcdUSB
 
 mkdir -p strings/0x409
 echo "123456" > strings/0x409/serialnumber

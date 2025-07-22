@@ -21,12 +21,12 @@
 //#include "ffb_types.h"
 
 // Configuration constants
-#define MAIN_LOOP_FREQUENCY_HZ 1000
+#define MAIN_LOOP_FREQUENCY_HZ 250 // Reduced from 1000 Hz to 250 Hz (4ms cycle time)
 #define CYCLE_TIME_NS (1000000000L / MAIN_LOOP_FREQUENCY_HZ)
 #define MAX_STEERING_ANGLE 540.0f  // ±540 degrees (3 full turns)
 #define MAX_TORQUE_LIMIT 5000.0f   // Maximum torque in appropriate units
-#define STATS_PRINT_INTERVAL 1000  // Print stats every 1000 loops (1 second)
-#define MAX_LATE_WARNINGS 10       // Limit timing warnings
+#define STATS_PRINT_INTERVAL 250  // Print stats every 250 loops (1 second at 250Hz)
+#define MAX_LATE_WARNINGS 50       // Increased limit for timing warnings
 #define EMERGENCY_STOP_THRESHOLD 10000.0f // Emergency torque threshold
 
 // Global flags and state
@@ -364,18 +364,6 @@ int main(int argc, char *argv[]) {
     // --- Subsystem Initialization ---
     printf("\n=== Initializing Subsystems ===\n");
     
-    // Initialize HID interface
-    printf("Initializing HID interface...\n");
-    if (hid_interface_init() != 0) {
-        fprintf(stderr, "Failed to initialize HID interface.\n");
-        cleanup_and_exit(EXIT_FAILURE);
-    }
-    
-    if (hid_interface_start() != 0) {
-        fprintf(stderr, "Failed to start HID interface.\n");
-        cleanup_and_exit(EXIT_FAILURE);
-    }
-    
     // Initialize FFB calculator
     printf("Initializing FFB calculator...\n");
     ffb_calculator_init();
@@ -389,14 +377,29 @@ int main(int argc, char *argv[]) {
         cleanup_and_exit(EXIT_FAILURE);
     }
     
-    // Wait for EtherCAT stabilization
-    printf("Waiting for EtherCAT stabilization...\n");
-    sleep(2);
+    printf("EtherCAT master initialized and stabilized.\n"); 
+    
+    // Initialize HID interface *after* EtherCAT is stable and can provide valid position
+    printf("Initializing HID interface...\n");
+    if (hid_interface_init() != 0) {
+        fprintf(stderr, "Failed to initialize HID interface.\n");
+        cleanup_and_exit(EXIT_FAILURE);
+    }
+    
+    // Recenter wheel *after* HID is initialized and SOEM is providing live data
+    // This ensures center_position is set to a meaningful value
+    hid_interface_recenter_wheel();
+
+    if (hid_interface_start() != 0) {
+        fprintf(stderr, "Failed to start HID interface.\n");
+        cleanup_and_exit(EXIT_FAILURE);
+    }
     
     // --- Main Control Loop ---
     printf("\n=== Starting Main Control Loop ===\n");
-    printf("Loop frequency: %d Hz (%.3f ms cycle time)\n", 
-           MAIN_LOOP_FREQUENCY_HZ, CYCLE_TIME_NS / 1000000.0);
+    // Corrected printf to reflect actual cycle time
+    printf("Loop frequency: %d Hz (target cycle time: %.3f ms)\n", 
+           MAIN_LOOP_FREQUENCY_HZ, (float)CYCLE_TIME_NS / 1000000.0);
     
     while (running) {
         clock_gettime(CLOCK_MONOTONIC, &app_state.loop_start_time);
@@ -413,7 +416,7 @@ int main(int argc, char *argv[]) {
         
         if (app_state.ethercat_status != app_state.last_ethercat_status) {
             printf("EtherCAT status changed: %s\n", 
-                   app_state.ethercat_status ? "Connected" : "Disconnected");
+                   app_state.ethercat_status ? "OK" : "LOST");
             if (!app_state.ethercat_status) {
                 app_state.stats.communication_errors++;
             }
@@ -422,6 +425,9 @@ int main(int argc, char *argv[]) {
         
         // 2. Get current position and velocity from servo
         app_state.current_position = soem_interface_get_current_position();
+        // Debug print for raw position from SOEM
+        printf("Main: Raw position from SOEM: %.2f\n", app_state.current_position);
+
         app_state.current_velocity = soem_interface_get_current_velocity();
         
         // 3. Get FFB commands from PC
@@ -443,12 +449,14 @@ int main(int argc, char *argv[]) {
             soem_interface_send_and_receive_pdo(0.0f);
         }
         
-        // 7. Read button states
+        // 7. Read button states (currently placeholder, returns 0)
         app_state.button_states = read_button_states();
         
         // 8. Send gamepad report to PC (only if HID is connected)
         if (app_state.hid_status) {
             app_state.normalized_position = normalize_position_for_hid(app_state.current_position);
+            // The hid_interface_send_gamepad_report is now non-blocking
+            // and will only send if the buffer is ready.
             hid_interface_send_gamepad_report(app_state.normalized_position, app_state.button_states);
         }
         
@@ -458,7 +466,7 @@ int main(int argc, char *argv[]) {
         
         // 10. Print periodic statistics
         if (app_state.stats.loop_count % STATS_PRINT_INTERVAL == 0) {
-            printf("Status: Pos=%.1f°, Vel=%.1f°/s, Torque=%.1f, EtherCAT=%s, HID=%s, Emergency=%s\n",
+            printf("Status: Pos=%.1f°, Vel=%.1f°/s, Torque=%.1f, EtherCAT=%s, HID=%s, Emergency=%s\\n",
                    app_state.current_position, app_state.current_velocity, app_state.desired_torque,
                    app_state.ethercat_status ? "OK" : "LOST",
                    app_state.hid_status ? "OK" : "LOST",
@@ -471,7 +479,7 @@ int main(int argc, char *argv[]) {
         // Clear emergency stop if torque is back to normal
         if (emergency_stop && fabs(app_state.desired_torque) < MAX_TORQUE_LIMIT * 0.5f) {
             emergency_stop = 0;
-            printf("Emergency stop cleared\n");
+            printf("Emergency stop cleared\\n");
         }
     }
     

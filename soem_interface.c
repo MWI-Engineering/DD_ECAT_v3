@@ -45,6 +45,8 @@ ec_groupt DCgroup;
 int wkc;
 int expectedWKC;
 ec_timet tmo;
+// Adjusted cycle_time to match main loop's 4ms (250Hz)
+int cycle_time = 4000; // 4 ms in microseconds
 
 // Use minimal essential mapping to avoid size issues
 uint32_t rxpdo_mapping[] = {
@@ -267,9 +269,11 @@ const char* get_state_name(uint16 state) {
 }
 
 // --- Helper functions for SDO operations ---
+// Increased SDO timeout for robustness
 int soem_interface_write_sdo(uint16_t slave_idx, uint16_t index, uint8_t subindex, uint16_t data_size, void *data) {
     int wkc_sdo;
-    wkc_sdo = ec_SDOwrite(slave_idx, index, subindex, FALSE, data_size, data, EC_TIMEOUTRXM);
+    // Use a more generous timeout for SDO writes
+    wkc_sdo = ec_SDOwrite(slave_idx, index, subindex, FALSE, data_size, data, 50000); // 50ms timeout
     if (wkc_sdo == 0) {
         fprintf(stderr, "SOEM_Interface: SDO write failed for slave %u, index 0x%04X:%02X\n", slave_idx, index, subindex);
         return -1;
@@ -277,10 +281,12 @@ int soem_interface_write_sdo(uint16_t slave_idx, uint16_t index, uint8_t subinde
     return 0;
 }
 
+// Increased SDO timeout for robustness
 int soem_interface_read_sdo(uint16_t slave_idx, uint16_t index, uint8_t subindex, uint16_t data_size, void *data) {
     int wkc_sdo;
     int actual_size = data_size;
-    wkc_sdo = ec_SDOread(slave_idx, index, subindex, FALSE, &actual_size, data, EC_TIMEOUTRXM);
+    // Use a more generous timeout for SDO reads
+    wkc_sdo = ec_SDOread(slave_idx, index, subindex, FALSE, &actual_size, data, 50000); // 50ms timeout
     if (wkc_sdo == 0) {
         fprintf(stderr, "SOEM_Interface: SDO read failed for slave %u, index 0x%04X:%02X\n", slave_idx, index, subindex);
         return -1;
@@ -290,7 +296,7 @@ int soem_interface_read_sdo(uint16_t slave_idx, uint16_t index, uint8_t subindex
 
 // --- Function to set EtherCAT slave state ---
 int soem_interface_set_ethercat_state(uint16_t slave_idx, ec_state desired_state) {
-    int max_retries = 5;
+    int max_retries = 10; // Increased retries
     int retry_count = 0;
     
     while (retry_count < max_retries) {
@@ -305,10 +311,10 @@ int soem_interface_set_ethercat_state(uint16_t slave_idx, ec_state desired_state
         ec_writestate(slave_idx);
         
         // Wait longer for state transition
-        usleep(20000); // 20ms delay
+        usleep(50000); // 50ms delay
         
         // Check the state with extended timeout
-        int wkc_state = ec_statecheck(slave_idx, desired_state, EC_TIMEOUTSTATE);
+        int wkc_state = ec_statecheck(slave_idx, desired_state, 100000); // 100ms timeout for state check
         
         if (wkc_state > 0 && (ec_slave[slave_idx].state & 0x0F) == desired_state) {
             printf("SOEM_Interface: Slave %u successfully transitioned to state %s\n", 
@@ -329,14 +335,14 @@ int soem_interface_set_ethercat_state(uint16_t slave_idx, ec_state desired_state
             ec_writestate(slave_idx);
             usleep(200000);
             
-            if (ec_statecheck(slave_idx, EC_STATE_SAFE_OP, EC_TIMEOUTSTATE * 2) > 0) {
+            if (ec_statecheck(slave_idx, EC_STATE_SAFE_OP, 200000) > 0) { // 200ms timeout
                 printf("SOEM_Interface: Intermediate SAFE_OP transition successful\n");
                 // Now try OPERATIONAL again
                 ec_slave[slave_idx].state = EC_STATE_OPERATIONAL;
                 ec_writestate(slave_idx);
                 usleep(200000);
                 
-                if (ec_statecheck(slave_idx, EC_STATE_OPERATIONAL, EC_TIMEOUTSTATE * 2) > 0) {
+                if (ec_statecheck(slave_idx, EC_STATE_OPERATIONAL, 200000) > 0) { // 200ms timeout
                     printf("SOEM_Interface: Final OPERATIONAL transition successful\n");
                     return 0;
                 }
@@ -345,8 +351,8 @@ int soem_interface_set_ethercat_state(uint16_t slave_idx, ec_state desired_state
         
         retry_count++;
         if (retry_count < max_retries) {
-            printf("SOEM_Interface: Retrying in 500ms...\n");
-            usleep(50000); // 50ms delay before retry
+            printf("SOEM_Interface: Retrying in 100ms...\n"); // Increased retry delay
+            usleep(100000); // 100ms delay before retry
         }
     }
     
@@ -359,7 +365,7 @@ int soem_interface_set_ethercat_state(uint16_t slave_idx, ec_state desired_state
 int perform_cia402_transition_to_operational(uint16_t slave_idx) {
     printf("SOEM_Interface: Starting CiA 402 state machine transition to operational...\n");
     
-    int max_attempts = 50;
+    int max_attempts = 100; // Increased attempts
     int attempt = 0;
     
     while (attempt < max_attempts) {
@@ -373,8 +379,8 @@ int perform_cia402_transition_to_operational(uint16_t slave_idx) {
         
         current_cia402_state = get_cia402_state(current_statusword);
         
-        printf("SOEM_Interface: Attempt %d - Current CiA 402 state: %s (statusword: 0x%04X)\n", 
-               attempt + 1, get_cia402_state_name(current_cia402_state), current_statusword);
+        printf("SOEM_Interface: CiA 402 State: %s (statusword: 0x%04X)\n", 
+               get_cia402_state_name(current_cia402_state), current_statusword);
         
         // Check if we're in operational state
         if (current_cia402_state == CIA402_STATE_OPERATION_ENABLED) {
@@ -411,16 +417,17 @@ int perform_cia402_transition_to_operational(uint16_t slave_idx) {
         // Apply controlword
         if (somanet_outputs) {
             somanet_outputs->controlword = current_controlword;
+            somanet_outputs->modes_of_operation = 4; // Torque mode (ensure it's always set)
         }
         
-        // Send PDO data
+        // Send PDO data to apply controlword
         ec_send_processdata();
-        wkc = ec_receive_processdata(EC_TIMEOUTRET);
+        wkc = ec_receive_processdata(EC_TIMEOUTRET); // Use default timeout for receive
         
-        printf("SOEM_Interface: Applied controlword: 0x%04X\n", current_controlword);
+        printf("SOEM_Interface: Applied controlword: 0x%04X, WKC: %d/%d\n", current_controlword, wkc, expectedWKC);
         
         attempt++;
-        usleep(5000); // 5ms delay between attempts
+        usleep(10000); // 10ms delay between attempts for state transitions
     }
     
     fprintf(stderr, "SOEM_Interface: Failed to reach operational state after %d attempts.\n", max_attempts);
@@ -435,7 +442,7 @@ void *ecat_loop(void *ptr) {
     printf("SOEM_Interface: EtherCAT thread started.\n");
 
     while (!master_initialized && ecat_thread_running) {
-        usleep(10000);
+        usleep(10000); // Wait for master to be initialized from main thread
     }
 
     if (!master_initialized) {
@@ -445,7 +452,12 @@ void *ecat_loop(void *ptr) {
 
     printf("SOEM_Interface: Entering EtherCAT cyclic loop.\n");
 
+    struct timespec loop_start, loop_end;
+    long elapsed_ns;
+
     while (ecat_thread_running) {
+        clock_gettime(CLOCK_MONOTONIC, &loop_start);
+
         // Update output PDO data
         pthread_mutex_lock(&pdo_mutex);
         if (somanet_outputs) {
@@ -467,12 +479,9 @@ void *ecat_loop(void *ptr) {
         wkc = ec_receive_processdata(EC_TIMEOUTRET);
 
         if (wkc < expectedWKC) {
-            printf("Working counter too low: %d < %d\n", wkc, expectedWKC);
-        }
-        
-        usleep(5000); // 5ms cycle time - well within watchdog timeout
-
-        if (wkc >= expectedWKC) {
+            printf("SOEM_Interface: Working counter too low: %d < %d\n", wkc, expectedWKC);
+            communication_ok = 0; // Communication not fully OK if WKC is low
+        } else {
             communication_ok = 1;
             
             // Update input PDO data
@@ -482,28 +491,47 @@ void *ecat_loop(void *ptr) {
                 current_cia402_state = get_cia402_state(current_statusword);
                 current_position_f = (float)somanet_inputs->position_actual_value;
                 current_velocity_f = (float)somanet_inputs->velocity_actual_value;
+                // Debug print for raw position from slave
+                //printf("SOEM_Interface: Raw Position Actual Value: %d (float: %.2f)\n", 
+                //       somanet_inputs->position_actual_value, current_position_f);
             }
             pthread_mutex_unlock(&pdo_mutex);
 
-            // Initialize state machine once
+            // Initialize state machine once after successful PDO exchange
             if (!state_machine_initialized && somanet_inputs && somanet_outputs) {
+                printf("SOEM_Interface: Attempting CiA 402 state machine initialization...\n");
                 if (perform_cia402_transition_to_operational(slave_idx) == 0) {
                     state_machine_initialized = 1;
-                    printf("SOEM_Interface: CiA 402 state machine initialized successfully.\n");
+                    printf("SOEM_Interface: CiA 402 state machine initialized successfully to Operation Enabled.\n");
                 } else {
                     fprintf(stderr, "SOEM_Interface: Failed to initialize CiA 402 state machine.\n");
+                    // If state machine fails, set communication_ok to 0 to indicate issue
+                    communication_ok = 0; 
                 }
             }
-        } else {
-            communication_ok = 0;
         }
 
-        // Check EtherCAT slave state
+        // Check EtherCAT slave state (optional, can be done less frequently if needed)
         if (!is_slave_operational(slave_idx)) {
-            ec_statecheck(slave_idx, EC_STATE_OPERATIONAL, EC_TIMEOUTSTATE);
+            // This might trigger a re-transition if the state drops
+            ec_statecheck(slave_idx, EC_STATE_OPERATIONAL, 100000); // 100ms timeout
         }
 
-        usleep(1000); // 1ms cycle time
+        clock_gettime(CLOCK_MONOTONIC, &loop_end);
+        elapsed_ns = (loop_end.tv_sec - loop_start.tv_sec) * 1000000000L + (loop_end.tv_nsec - loop_start.tv_nsec);
+        long sleep_ns = cycle_time * 1000L - elapsed_ns; // cycle_time is in microseconds
+
+        if (sleep_ns > 0) {
+            struct timespec sleep_time = {
+                .tv_sec = sleep_ns / 1000000000L,
+                .tv_nsec = sleep_ns % 1000000000L
+            };
+            nanosleep(&sleep_time, NULL);
+        } else {
+            // This indicates the EtherCAT thread itself is running late
+            printf("SOEM_Interface: EtherCAT thread running %.3fms late (target: %.3fms, actual: %.3fms)\n",
+                   -sleep_ns / 1000000.0, (float)cycle_time / 1000.0, (float)elapsed_ns / 1000000.0);
+        }
     }
 
     printf("SOEM_Interface: EtherCAT thread stopping.\n");
@@ -866,7 +894,7 @@ int soem_interface_init_enhanced(const char *ifname) {
     for (int wd_cycles = 0; wd_cycles < 10; wd_cycles++) {
         ec_send_processdata();
         ec_receive_processdata(EC_TIMEOUTRET);
-        usleep(1000); // 1ms between cycles
+        usleep(cycle_time); // 4ms between cycles
     }
 
     // Transition to Operational with enhanced function
@@ -918,9 +946,9 @@ void soem_interface_send_and_receive_pdo(float target_torque) {
 
 float soem_interface_get_current_position(void) {
     pthread_mutex_lock(&pdo_mutex);
-    float pos = current_position_f;
+    float raw_pos = current_position_f;
     pthread_mutex_unlock(&pdo_mutex);
-    return pos;
+    return raw_pos;
 }
 
 float soem_interface_get_current_velocity() {
